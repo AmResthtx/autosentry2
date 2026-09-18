@@ -6,11 +6,20 @@
     android:padding="24dp">
 
     <TextView
+        android:id="@+id/textAdapterStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#757575"
+        android:text="No OBD adapter paired yet" />
+
+    <TextView
         android:id="@+id/textOilLife"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="28sp"
         android:textStyle="bold"
+        android:layout_marginTop="8dp"
         android:text="Oil life: --%" />
 
     <TextView
@@ -87,5 +96,25 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:text="Service Schedule" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#33000000"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/buttonPairAdapter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Pair OBD Adapter" />
+
+    <Button
+        android:id="@+id/buttonAutoTrackingToggle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Auto-Tracking: On" />
 
 </LinearLayout>

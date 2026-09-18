@@ -46,6 +46,21 @@
             android:exported="false"
             android:foregroundServiceType="location|connectedDevice" />
 
+        <!--
+          Manifest-registered (not runtime) so Android delivers Bluetooth
+          connect/disconnect events even when the app isn't running — this
+          is what makes tracking start just by walking up with the phone
+          in your pocket.
+        -->
+        <receiver
+            android:name=".receiver.BluetoothConnectionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

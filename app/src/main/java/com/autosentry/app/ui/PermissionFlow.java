@@ -50,11 +50,23 @@ public final class PermissionFlow {
         }
         if (!missing.isEmpty()) {
             ActivityCompat.requestPermissions(activity, missing.toArray(new String[0]), PERMISSION_REQ);
+            // BLUETOOTH_CONNECT (needed below by adapter.isEnabled() on API 31+) was
+            // just requested, not yet granted — permission results are asynchronous,
+            // so checking Bluetooth state now would crash with a SecurityException
+            // on a fresh install. Bail here; MainActivity re-checks once the app is
+            // actually used (e.g. Pair OBD Adapter), by which point the permission
+            // request has been answered.
+            return;
         }
 
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null || !adapter.isEnabled()) {
-            Toast.makeText(activity, "Please pair your OBD adapter in Settings > Bluetooth", Toast.LENGTH_LONG).show();
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || !adapter.isEnabled()) {
+                Toast.makeText(activity, "Please pair your OBD adapter in Settings > Bluetooth", Toast.LENGTH_LONG).show();
+            }
+        } catch (SecurityException e) {
+            // Defensive: some OEM builds enforce BLUETOOTH_CONNECT even in paths
+            // Android's own docs don't require it for. Not fatal either way.
         }
     }
 }

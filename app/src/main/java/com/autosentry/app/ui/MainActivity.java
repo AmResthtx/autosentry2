@@ -1,5 +1,6 @@
 package com.autosentry.app.ui;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,8 +16,12 @@ import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
+import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
+import com.autosentry.app.maintenance.ServiceItemType;
+import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.service.TrackingService;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
 
     private TextView textOilLife, textOdometer, textSpeed, textMpg, textRpm, textCoolant, textTrip;
-    private Button buttonToggleTracking, buttonResetOil;
+    private Button buttonToggleTracking, buttonResetOil, buttonServiceStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +53,7 @@ public class MainActivity extends AppCompatActivity {
         textTrip = findViewById(R.id.textTrip);
         buttonToggleTracking = findViewById(R.id.buttonToggleTracking);
         buttonResetOil = findViewById(R.id.buttonResetOil);
+        buttonServiceStatus = findViewById(R.id.buttonServiceStatus);
 
         if (!PermissionFlow.hasAllPermissions(this)) {
             PermissionFlow.requestAllPermissions(this);
@@ -55,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
 
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
         buttonResetOil.setOnClickListener(v -> resetOilLife());
+        buttonServiceStatus.setOnClickListener(v -> showServiceStatus());
 
         ioExecutor.execute(() -> {
             if (db.vehicleProfileDao().getSync() == null) {
@@ -91,11 +98,37 @@ public class MainActivity extends AppCompatActivity {
             db.vehicleProfileDao().update(profile);
 
             MaintenanceEvent event = new MaintenanceEvent();
-            event.type = "OIL_CHANGE";
+            event.type = ServiceItemType.OIL_FILTER.name();
             event.notes = "Logged from dashboard";
             event.timestamp = System.currentTimeMillis();
             event.odometerAtEvent = profile.odometerMiles;
             db.maintenanceDao().insert(event);
+        });
+    }
+
+    /**
+     * Shows %-of-life used for every manufacturer-scheduled item (Ford's
+     * 7.3L Power Stroke severe-duty intervals by default), flagging anything
+     * at or past MaintenanceScheduleEngine.DUE_SOON_THRESHOLD_PERCENT (80%).
+     */
+    private void showServiceStatus() {
+        ioExecutor.execute(() -> {
+            VehicleProfile profile = db.vehicleProfileDao().getSync();
+            if (profile == null) return;
+            List<ServiceStatus> statuses = MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao());
+
+            StringBuilder sb = new StringBuilder();
+            for (ServiceStatus status : statuses) {
+                String flag = status.overdue ? " — OVERDUE" : (status.dueSoon ? " — DUE SOON" : "");
+                sb.append(String.format("%s: %.0f%% used, %.0f mi remaining%s\n",
+                        status.displayName, status.percentOfLifeUsed, status.milesRemaining(), flag));
+            }
+
+            uiHandler.post(() -> new AlertDialog.Builder(this)
+                    .setTitle(profile.severeDuty ? "Service Schedule (Severe Duty)" : "Service Schedule (Normal Duty)")
+                    .setMessage(sb.toString())
+                    .setPositiveButton("Close", null)
+                    .show());
         });
     }
 

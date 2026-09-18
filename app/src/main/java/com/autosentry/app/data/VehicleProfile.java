@@ -24,6 +24,12 @@ public class VehicleProfile {
     public double totalFuelGallons;
     public double lifetimeAvgMpg;
 
+    // Governs which column of ServiceInterval applies. Defaults to true:
+    // Ford's severe-duty conditions (towing, extended idling, sub-25mph
+    // traffic, dust, temperature extremes) cover most work-truck usage,
+    // and it's safer to alert early on a high-mile truck than late.
+    public boolean severeDuty = true;
+
     public static VehicleProfile newDefault() {
         VehicleProfile p = new VehicleProfile();
         p.id = 1L;

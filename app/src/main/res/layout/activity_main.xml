@@ -88,7 +88,21 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Log Oil Change" />
+        android:text="Log Oil Change (quick)" />
+
+    <Button
+        android:id="@+id/buttonLogMaintenance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Log Maintenance / Upgrade + Photos" />
+
+    <Button
+        android:id="@+id/buttonMaintenanceHistory"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Maintenance History" />
 
     <Button
         android:id="@+id/buttonServiceStatus"

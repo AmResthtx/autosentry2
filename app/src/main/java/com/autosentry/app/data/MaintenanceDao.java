@@ -15,6 +15,9 @@ public interface MaintenanceDao {
     @Query("SELECT * FROM maintenance_events ORDER BY timestamp DESC")
     LiveData<List<MaintenanceEvent>> observeAll();
 
+    @Query("SELECT * FROM maintenance_events ORDER BY timestamp DESC")
+    List<MaintenanceEvent> getAllSync();
+
     @Query("SELECT * FROM maintenance_events WHERE type = :type ORDER BY timestamp DESC LIMIT 1")
     MaintenanceEvent getMostRecentOfType(String type);
 }

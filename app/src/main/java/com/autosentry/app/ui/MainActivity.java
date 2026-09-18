@@ -39,7 +39,8 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
 
     private TextView textAdapterStatus, textOilLife, textOdometer, textSpeed, textMpg, textRpm, textCoolant, textTrip;
-    private Button buttonToggleTracking, buttonResetOil, buttonServiceStatus, buttonPairAdapter, buttonAutoTrackingToggle, buttonDebugLog;
+    private Button buttonToggleTracking, buttonResetOil, buttonLogMaintenance, buttonMaintenanceHistory,
+            buttonServiceStatus, buttonPairAdapter, buttonAutoTrackingToggle, buttonDebugLog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,6 +59,8 @@ public class MainActivity extends AppCompatActivity {
         textTrip = findViewById(R.id.textTrip);
         buttonToggleTracking = findViewById(R.id.buttonToggleTracking);
         buttonResetOil = findViewById(R.id.buttonResetOil);
+        buttonLogMaintenance = findViewById(R.id.buttonLogMaintenance);
+        buttonMaintenanceHistory = findViewById(R.id.buttonMaintenanceHistory);
         buttonServiceStatus = findViewById(R.id.buttonServiceStatus);
         buttonPairAdapter = findViewById(R.id.buttonPairAdapter);
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
@@ -69,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
 
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
         buttonResetOil.setOnClickListener(v -> resetOilLife());
+        buttonLogMaintenance.setOnClickListener(v -> startActivity(new Intent(this, LogMaintenanceActivity.class)));
+        buttonMaintenanceHistory.setOnClickListener(v -> startActivity(new Intent(this, MaintenanceHistoryActivity.class)));
         buttonServiceStatus.setOnClickListener(v -> showServiceStatus());
         buttonPairAdapter.setOnClickListener(v -> pickObdAdapter());
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());

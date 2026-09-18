@@ -8,7 +8,11 @@ public class MaintenanceEvent {
     @PrimaryKey(autoGenerate = true)
     public long id;
 
-    public String type; // e.g. "OIL_CHANGE", "TIRE_ROTATION", "FILTER"
+    // A ServiceItemType.name() for scheduled items (OIL_FILTER, etc.), or
+    // "UPGRADE" / "OTHER" for anything outside the manufacturer schedule
+    // (mods, custom work) that still deserves a documented, photo-backed record.
+    public String type;
+    public String title; // short label, e.g. "Steel front bumper" — mainly for UPGRADE/OTHER
     public String notes;
     public long timestamp;
     public double odometerAtEvent;

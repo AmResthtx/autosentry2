@@ -31,6 +31,15 @@ the adapter connects, tracking starts, and it stops itself when you walk away.
 - **Hands-off tracking** — pair the adapter once; a manifest-registered
   Bluetooth receiver starts/stops tracking automatically on connect/disconnect,
   even if the app was never manually opened.
+- **Photo-verified maintenance & upgrade history** — log any service or
+  modification (scheduled item or free-form, e.g. "Steel front bumper") with
+  photos of receipts, parts, or the install attached, timestamped and tied
+  to the odometer reading at the time. This is specifically for the gap
+  CarFax leaves wide open: CarFax only shows what a dealer or shop reported
+  to it, so a driveway oil change or a DIY suspension upgrade never appears
+  there no matter how well done it was. A seller gets to actually document
+  and substantiate the money they put into the vehicle; a buyer gets more
+  than someone's word for it.
 - **On-device debug log** — since this runs on a tablet permanently mounted
   in the truck, not tethered to a laptop, crashes and errors write to a local
   log viewable and shareable straight from the app.
@@ -50,8 +59,9 @@ service/         TrackingService — foreground service tying OBD + GPS +
 receiver/        BluetoothConnectionReceiver — auto start/stop on adapter
                  connect/disconnect
 data/            Room entities/DAOs (PIDs, sessions, trip points, vehicle
-                 profile, maintenance events)
-ui/              MainActivity (dashboard), DebugLogActivity
+                 profile, maintenance events + photo attachments)
+ui/              MainActivity (dashboard), DebugLogActivity,
+                 LogMaintenanceActivity, MaintenanceHistoryActivity
 ```
 
 All storage is local (Room + SharedPreferences). No network calls, no

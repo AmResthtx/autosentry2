@@ -23,6 +23,10 @@
     <!-- Internet for future cloud sync / parts lookup -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Camera for photographing receipts/parts on maintenance & upgrade events -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -43,6 +47,14 @@
 
         <activity
             android:name=".ui.DebugLogActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.LogMaintenanceActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.MaintenanceHistoryActivity"
             android:exported="false" />
 
         <provider

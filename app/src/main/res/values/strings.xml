@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">AutoSentry</string>
+    <string name="start_trip">Start Trip</string>
+    <string name="end_trip">End Trip</string>
+    <string name="export_trips">Export Trips</string>
+    <string name="no_active_trip">No active trip</string>
+    <string name="trip_active">Trip active (ID: %1$d)</string>
+    <string name="total_trips">Total trips: %1$d</string>
+    <string name="rpm_display">RPM: %1$d</string>
+    <string name="coolant_display">Coolant: %1$d °F</string>
+    <string name="export_success">Exported to: %1$s</string>
+    <string name="export_failed">Export failed: %1$s</string>
+    <string name="no_trip_to_end">No active trip to end</string>
+    <string name="bluetooth_permission">Bluetooth permission required for OBD adapter</string>
+    <string name="notification_permission">Notifications required for RPM alerts</string>
+    <string name="location_permission">Location permission required for Bluetooth scanning (Android 12+)</string>
+</resources>

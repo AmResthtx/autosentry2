@@ -24,6 +24,7 @@ import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.notifications.NotificationUtils;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.OBDSimulator;
+import com.autosentry.app.util.AppLog;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -115,7 +116,7 @@ public class TrackingService extends Service {
             try {
                 realAdapter.connect();
             } catch (Exception e) {
-                Log.e(TAG, "OBD connect failed, falling back to simulator", e);
+                AppLog.e(this, TAG, "OBD connect failed, falling back to simulator", e);
                 useRealAdapter = false;
             }
         }
@@ -193,7 +194,7 @@ public class TrackingService extends Service {
                         "%.0f mph | %.1f MPG | Oil life %.0f%%",
                         lastSpeedMph, instantMpg, profile.oilLifePercent));
             } catch (Exception e) {
-                Log.e(TAG, "Poll tick failed", e);
+                AppLog.e(this, TAG, "Poll tick failed", e);
             }
 
             mainHandler.postDelayed(pollTask, POLL_INTERVAL_MS);

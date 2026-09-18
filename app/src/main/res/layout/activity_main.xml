@@ -117,4 +117,11 @@
         android:layout_marginTop="12dp"
         android:text="Auto-Tracking: On" />
 
+    <Button
+        android:id="@+id/buttonDebugLog"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="View Debug Log" />
+
 </LinearLayout>

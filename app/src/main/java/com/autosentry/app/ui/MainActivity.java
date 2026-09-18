@@ -39,7 +39,7 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
 
     private TextView textAdapterStatus, textOilLife, textOdometer, textSpeed, textMpg, textRpm, textCoolant, textTrip;
-    private Button buttonToggleTracking, buttonResetOil, buttonServiceStatus, buttonPairAdapter, buttonAutoTrackingToggle;
+    private Button buttonToggleTracking, buttonResetOil, buttonServiceStatus, buttonPairAdapter, buttonAutoTrackingToggle, buttonDebugLog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
         buttonServiceStatus = findViewById(R.id.buttonServiceStatus);
         buttonPairAdapter = findViewById(R.id.buttonPairAdapter);
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
+        buttonDebugLog = findViewById(R.id.buttonDebugLog);
 
         if (!PermissionFlow.hasAllPermissions(this)) {
             PermissionFlow.requestAllPermissions(this);
@@ -71,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
         buttonServiceStatus.setOnClickListener(v -> showServiceStatus());
         buttonPairAdapter.setOnClickListener(v -> pickObdAdapter());
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());
+        buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
 
         ioExecutor.execute(() -> {
             if (db.vehicleProfileDao().getSync() == null) {

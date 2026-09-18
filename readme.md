@@ -79,21 +79,29 @@ committed, just live options:
   integration with parts sellers, from small regional diesel shops to
   larger retailers, timed to when the user is actually about to need
   something rather than generic ads.
-- **Dash cam partnership.** A bundled or discounted dash cam tied to the app
-  would extend what's already being tracked (trip data, speed, GPS path)
-  into video evidence — useful for accident documentation, insurance
-  claims, and dispute resolution, and a natural hardware companion to an
-  app that's already living in the vehicle.
+- **Dash cam partnership — the evidence layer.** A bundled dash cam tied to
+  the app isn't just an accessory; it's the thing that makes the insurance
+  angle below actually work. Recorded video is close to undeniable in a
+  claim: it clears the driver outright when they weren't at fault, and it
+  ends the argument fast when they were. Either way, it collapses the part
+  of a claim that costs insurers the most — the drawn-out
+  he-said/she-said/lawyer-said dispute over fault. A fleet where every
+  driver has a camera rolling is a fleet with dramatically fewer contested
+  claims, which is a real, defensible cost advantage, not just a marketing
+  angle.
 - **Usage-based insurance, potentially through a captive insurer.** The app
-  is already collecting the exact data usage-based insurance underwrites
-  on: real driving behavior, mileage, speed patterns, maintenance
-  compliance. A well-maintained vehicle with verified service history and
-  real telematics data is a materially better risk than an unknown one — in
-  principle that gap could fund a genuinely better rate, and pairing a free
-  or subsidized dash cam through a captive insurance arm is a plausible way
-  to fund both. This is the most complex path by far (insurance is a
-  heavily regulated, state-by-state business) and would need actual
-  actuarial and legal expertise before it's anything more than an idea.
+  already collects real driving behavior, mileage, and maintenance
+  compliance; the dash cam adds undeniable fault evidence on top of that.
+  Combined, that's a materially better risk pool than an insurer underwriting
+  blind — good enough that the rate doesn't need to dramatically undercut
+  competitors to be profitable, just noticeably beat them, because claims
+  cost less to resolve and fewer are fraudulent or disputed. Verified safety
+  upgrades (e.g. a documented aftermarket bumper) could stack as additional
+  discounts on top, the same way they'd lower risk in the real world. This
+  is the most complex path by far — insurance is a heavily regulated,
+  state-by-state business — and would need real actuarial and legal
+  expertise before it's anything more than an idea, but the dash cam is
+  what makes the economics plausible in the first place.
 - **Community/fleet angle.** The per-vehicle architecture (VehicleProfile,
   ServiceInterval tables) generalizes past one F-250 — other makes/models
   just need their own interval tables and PID sets. A shared, crowd-sourced

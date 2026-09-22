@@ -163,9 +163,23 @@ public class ELM327Adapter {
         return parseMode01(response, pid);
     }
 
+    /**
+     * Ford enhanced engine oil temperature (Mode 22, PID 194F) for the 2000 7.3L
+     * Power Stroke, which doesn't answer the standard Mode 01 oil-temp PID.
+     * Returns Celsius, or NaN when the truck had no answer.
+     */
+    public synchronized double readFordEngineOilTempC() throws IOException {
+        int[] data = parseReply(command("22194F", PID_TIMEOUT_MS), "62194F");
+        return (data == null || data.length < 1) ? Double.NaN : data[0] - 40;
+    }
+
     static int[] parseMode01(String response, int pid) {
+        return parseReply(response, String.format(Locale.US, "41%02X", pid));
+    }
+
+    /** Data bytes after {@code header} (e.g. "410C", "62194F"), or null when absent. */
+    static int[] parseReply(String response, String header) {
         if (response == null) return null;
-        String header = String.format(Locale.US, "41%02X", pid);
         for (String rawLine : response.split("[\\r\\n]+")) {
             String line = rawLine.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
             if (!line.startsWith(header)) continue; // skips SEARCHING..., NO DATA, BUS INIT: OK, etc.

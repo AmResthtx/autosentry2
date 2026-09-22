@@ -14,6 +14,7 @@ public final class AppSettings {
     private static final String KEY_ADAPTER_ADDRESS = "obd_adapter_address";
     private static final String KEY_ADAPTER_NAME = "obd_adapter_name";
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
+    private static final String KEY_SIMULATOR_MODE_ENABLED = "simulator_mode_enabled";
 
     private AppSettings() {}
 
@@ -46,5 +47,13 @@ public final class AppSettings {
 
     public static boolean isAutoTrackingEnabled(Context context) {
         return prefs(context).getBoolean(KEY_AUTO_TRACKING_ENABLED, true);
+    }
+
+    public static void setSimulatorModeEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_SIMULATOR_MODE_ENABLED, enabled).apply();
+    }
+
+    public static boolean isSimulatorModeEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SIMULATOR_MODE_ENABLED, false);
     }
 }

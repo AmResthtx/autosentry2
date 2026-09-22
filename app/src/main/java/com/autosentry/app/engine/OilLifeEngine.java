@@ -19,8 +19,8 @@ public final class OilLifeEngine {
     public static final int NORMAL_INTERVAL_MILES = 5000;
     public static final int SEVERE_INTERVAL_MILES = 3000;
 
-    // Coolant temp (F) above which we treat driving as extra severe duty.
-    private static final double SEVERE_COOLANT_TEMP_F = 220.0;
+    // Engine oil temp (F) above which we treat driving as extra severe duty.
+    private static final double SEVERE_OIL_TEMP_F = 220.0;
     // RPM below which (while engine running) counts as idling, also extra severe.
     private static final double IDLE_RPM_THRESHOLD = 900.0;
 
@@ -31,13 +31,13 @@ public final class OilLifeEngine {
      * @param milesDelta       miles driven since last tick
      * @param severeDuty       whether the vehicle profile is set to Ford's severe-service schedule
      * @param avgRpm           average RPM during this tick (extra severe-duty detection: idling)
-     * @param avgCoolantTempF  average coolant temp (F) during this tick (extra severe-duty detection: overheating)
+     * @param avgEngineTempF   average engine oil temp (F) during this tick (extra severe-duty detection: overheating)
      * @return new oil life %, clamped to [0, 100]
      */
     public static double degrade(double currentPercent, double milesDelta, boolean severeDuty,
-                                  double avgRpm, double avgCoolantTempF) {
+                                   double avgRpm, double avgEngineTempF) {
         int baseIntervalMiles = severeDuty ? SEVERE_INTERVAL_MILES : NORMAL_INTERVAL_MILES;
-        double severity = severityMultiplier(avgRpm, avgCoolantTempF);
+        double severity = severityMultiplier(avgRpm, avgEngineTempF);
 
         double percentUsed = (milesDelta * severity / baseIntervalMiles) * 100.0;
         double result = currentPercent - percentUsed;
@@ -45,9 +45,9 @@ public final class OilLifeEngine {
     }
 
     /** 1.0 = normal duty, up to 1.5 for hot/idling conditions beyond the already-severe baseline. */
-    public static double severityMultiplier(double avgRpm, double avgCoolantTempF) {
+    public static double severityMultiplier(double avgRpm, double avgEngineTempF) {
         double multiplier = 1.0;
-        if (avgCoolantTempF > SEVERE_COOLANT_TEMP_F) multiplier += 0.25;
+        if (avgEngineTempF > SEVERE_OIL_TEMP_F) multiplier += 0.25;
         if (avgRpm > 0 && avgRpm < IDLE_RPM_THRESHOLD) multiplier += 0.25;
         return multiplier;
     }

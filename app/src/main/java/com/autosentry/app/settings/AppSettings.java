@@ -21,12 +21,9 @@ public final class AppSettings {
     private static final String KEY_ADAPTER_ADDRESS = "obd_adapter_address";
     private static final String KEY_ADAPTER_NAME = "obd_adapter_name";
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
-<<<<<<< Updated upstream
     private static final String KEY_SIMULATOR_MODE_ENABLED = "simulator_mode_enabled";
-=======
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
->>>>>>> Stashed changes
 
     private AppSettings() {}
 
@@ -61,14 +58,14 @@ public final class AppSettings {
         return prefs(context).getBoolean(KEY_AUTO_TRACKING_ENABLED, true);
     }
 
-<<<<<<< Updated upstream
     public static void setSimulatorModeEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_SIMULATOR_MODE_ENABLED, enabled).apply();
     }
 
     public static boolean isSimulatorModeEnabled(Context context) {
         return prefs(context).getBoolean(KEY_SIMULATOR_MODE_ENABLED, false);
-=======
+    }
+
     /** Which readings the dashboard shows, in display order. Set from the "Edit Dashboard" screen. */
     public static List<Integer> getDashboardPids(Context context) {
         String stored = prefs(context).getString(KEY_DASHBOARD_PIDS, null);
@@ -118,6 +115,5 @@ public final class AppSettings {
             sb.append(id);
         }
         return sb.toString();
->>>>>>> Stashed changes
     }
 }

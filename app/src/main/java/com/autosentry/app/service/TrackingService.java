@@ -82,6 +82,8 @@ public class TrackingService extends Service {
     private Session activeSession;
     private VehicleProfile profile;
     private Set<Integer> supportedPids = Collections.emptySet();
+    // True when the truck answers Ford's enhanced oil-temp PID (7.3L) instead of the standard one.
+    private boolean fordOilTemp = false;
     // Avoids re-notifying every tick once an item crosses 80%; cleared
     // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
@@ -244,10 +246,16 @@ public class TrackingService extends Service {
             return false;
         }
         supportedPids = found;
-        LiveReadings.supported = found;
-        AppSettings.setSupportedPids(this, found);
+        fordOilTemp = !found.contains(PidCatalog.ENGINE_OIL_TEMP)
+                && !Double.isNaN(realAdapter.readFordEngineOilTempC());
+        // Offer "Engine Oil Temp" in the dashboard editor when either source works.
+        Set<Integer> offered = new LinkedHashSet<>(found);
+        if (fordOilTemp) offered.add(PidCatalog.ENGINE_OIL_TEMP);
+        LiveReadings.supported = offered;
+        AppSettings.setSupportedPids(this, offered);
         AppLog.i(this, TAG, "Truck answered on " + realAdapter.describeProtocol()
-                + "; supported PIDs: " + describePids(found));
+                + "; supported PIDs: " + describePids(found)
+                + "; Ford enhanced oil temp: " + (fordOilTemp ? "yes" : "no"));
         return true;
     }
 
@@ -265,6 +273,7 @@ public class TrackingService extends Service {
         want.add(PidCatalog.COOLANT);
         want.add(PidCatalog.MAF);
         want.add(PidCatalog.FUEL_RATE);
+        want.add(PidCatalog.ENGINE_OIL_TEMP);
 
         for (int id : want) {
             PidCatalog.Pid def = PidCatalog.get(id);
@@ -276,6 +285,14 @@ public class TrackingService extends Service {
                 LiveReadings.values.remove(id);
             } else {
                 LiveReadings.values.put(id, value);
+            }
+        }
+        if (useRealAdapter && fordOilTemp) {
+            double oilC = realAdapter.readFordEngineOilTempC();
+            if (Double.isNaN(oilC)) {
+                LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
+            } else {
+                LiveReadings.values.put(PidCatalog.ENGINE_OIL_TEMP, oilC * 9.0 / 5.0 + 32.0);
             }
         }
 
@@ -317,7 +334,9 @@ public class TrackingService extends Service {
         double gallonsDelta = gallonsPerHour * (dtSeconds / 3600.0);
         lastInstantMpg = (gallonsPerHour > 0.01 && speedMph > 0.5) ? speedMph / gallonsPerHour : 0;
 
-        Double coolantF = LiveReadings.values.get(PidCatalog.COOLANT);
+        // Oil life runs on engine oil temp (the 7.3L's real thermal signal); coolant only as fallback.
+        Double oilTempF = LiveReadings.values.get(PidCatalog.ENGINE_OIL_TEMP);
+        Double engineTempF = oilTempF != null ? oilTempF : LiveReadings.values.get(PidCatalog.COOLANT);
 
         if (activeSession == null) startSession(now);
 
@@ -327,7 +346,7 @@ public class TrackingService extends Service {
         profile.totalFuelGallons += gallonsDelta;
         profile.oilLifePercent = OilLifeEngine.degrade(
                 profile.oilLifePercent, distanceDeltaMiles, profile.severeDuty,
-                rpm != null ? rpm : 0, coolantF != null ? coolantF : 0);
+                rpm != null ? rpm : 0, engineTempF != null ? engineTempF : 0);
 
         activeSession.distanceMiles += distanceDeltaMiles;
         activeSession.fuelGallonsUsed += gallonsDelta;

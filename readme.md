@@ -6,6 +6,7 @@ The whole point is zero change to the driver's habits. Pair the OBD adapter once
 
 ## What it does today
 
+<<<<<<< Updated upstream
 - **Vehicle data monitoring** — live PIDs, DTC reading (stored/pending/permanent), and a vehicle-specific diagnostic data layer. Default signals are selected for the 7.3L Power Stroke, while the PID system is intended to allow users to add, remove, and customize monitored values.
 - **7.3L thermal monitoring** — this truck's important engine-temperature signal is engine oil temperature, not a generic coolant-temperature assumption. Ford-enhanced PID support is used where available, and unavailable signals are reported honestly rather than replaced with guesses.
 - **Oil life that actually moves** — degrades in real time from accumulated mileage against the 7.3L service schedule (3,000 mi severe / 5,000 mi normal), with engine hours, idling, and engine oil temperature used to identify additional severe-duty conditions. The app treats mileage and engine hours as separate usage measurements; it does not invent an unsupported factory engine-hour interval.
@@ -72,6 +73,48 @@ AutoSentry separates:
 - **Unavailable:** a PID or vehicle signal that did not return valid data.
 
 This keeps the maintenance notebook useful without pretending that a mileage estimate, a VIN age calculation, or a single PID reading is proof of component condition.
+=======
+- **OBD-II / diagnostics** — live PIDs, DTC reading (stored/pending/
+  permanent), with a 7.3L Power Stroke-specific code dictionary. Talks to the
+  truck over auto-detected protocol (the 2000 F-250 is J1850, not CAN) and
+  asks it which PIDs it supports. Runs against a simulator only when no
+  adapter has been paired, so the app is testable without hardware.
+- **Editable dashboard** — "Edit Dashboard" lets you pick which readings to
+  monitor from the PIDs your truck actually reports (RPM, speed, coolant,
+  load, boost, MAF, fuel rate, and more) plus computed ones like instant and
+  trip MPG. Values show while the engine is running.
+- **Oil life that actually moves** — degrades in real time from accumulated
+  mileage against Ford's own published 7.3L intervals (3,000 mi severe /
+  5,000 mi normal), with a severe-duty multiplier for heavy idling or
+  overheating. This was the reason the app got rebuilt: the old version set
+  oil life once and never touched it again.
+- **Full manufacturer service schedule** — oil, fuel filter, air filter,
+  transmission fluid, transfer case, front/rear differential, and coolant,
+  each tracked against Ford's Normal vs. Severe Service intervals. Notifies
+  you when service is approaching — the moment any item crosses 80% of its
+  service life, well before it's actually due.
+- **Trip computer** — speed, distance, and real-time MPG computed from
+  MAF airflow (or the truck's fuel-rate reading) and the truck's own speed
+  signal, falling back to GPS. Engine-on time and distance are only counted
+  while the engine is actually running. Every trip is logged with distance, fuel used, and average MPG,
+  so when something does need attention you can look back and see how long
+  the problem has been there and how bad it is.
+- **Hands-off tracking** — pair the adapter once; a manifest-registered
+  Bluetooth receiver starts/stops tracking automatically on connect/disconnect,
+  even if the app was never manually opened.
+- **Photo-verified maintenance & upgrade history** — log any service or
+  modification (scheduled item or free-form, e.g. "Steel front bumper") with
+  photos of receipts, parts, or the install attached, timestamped and tied
+  to the odometer reading at the time. This is specifically for the gap
+  CarFax leaves wide open: CarFax only shows what a dealer or shop reported
+  to it, so a driveway oil change or a DIY suspension upgrade never appears
+  there no matter how well done it was. A seller gets to actually document
+  and substantiate the money they put into the vehicle; a buyer gets more
+  than someone's word for it.
+- **On-device debug log** — since this runs on a tablet permanently mounted
+  in the truck, not tethered to a laptop, crashes and errors write to a local
+  log viewable and shareable straight from the app.
+>>>>>>> Stashed changes
 
 ## Architecture
 

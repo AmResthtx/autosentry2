@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
+    <!-- Keeps the CPU awake while tracking so polling doesn't stop when the screen turns off -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- GPS for speed/distance -> MPG and trip tracking -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -19,6 +22,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!--
+      Lets the user exempt the app from battery optimization, which is what
+      allows Android 12+ to start tracking from the Bluetooth receiver while
+      the app is closed.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Internet for future cloud sync / parts lookup -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -70,7 +80,7 @@
         <service
             android:name=".service.TrackingService"
             android:exported="false"
-            android:foregroundServiceType="location|connectedDevice" />
+            android:foregroundServiceType="connectedDevice" />
 
         <!--
           Manifest-registered (not runtime) so Android delivers Bluetooth

@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat;
 
 public final class NotificationUtils {
     public static final String CHANNEL_TRACKING = "tracking";
+    public static final String CHANNEL_ALERTS = "service_alerts";
     public static final int TRACKING_NOTIFICATION_ID = 1001;
 
     private NotificationUtils() {}
@@ -21,6 +22,13 @@ public final class NotificationUtils {
                 CHANNEL_TRACKING, "Trip Tracking", NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("Live OBD + GPS tracking while a trip is active");
         manager.createNotificationChannel(channel);
+
+        // Separate, louder channel: service warnings must actually get noticed,
+        // unlike the always-on tracking notification which stays quiet.
+        NotificationChannel alerts = new NotificationChannel(
+                CHANNEL_ALERTS, "Service Alerts", NotificationManager.IMPORTANCE_HIGH);
+        alerts.setDescription("Warns when a maintenance item is approaching its service interval");
+        manager.createNotificationChannel(alerts);
     }
 
     public static NotificationCompat.Builder trackingNotificationBuilder(Context context) {

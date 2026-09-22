@@ -2,140 +2,203 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/textAdapterStatus"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="13sp"
-        android:textColor="#757575"
-        android:text="No OBD adapter paired yet" />
+        android:orientation="horizontal"
+        android:padding="8dp">
 
-    <TextView
-        android:id="@+id/textOilLife"
+        <Button
+            android:id="@+id/buttonTabDashboard"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Dashboard" />
+
+        <Button
+            android:id="@+id/buttonTabService"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="Service" />
+    </LinearLayout>
+
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:layout_marginTop="8dp"
-        android:text="Oil life: --%" />
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-    <TextView
-        android:id="@+id/textOdometer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="16sp"
-        android:layout_marginTop="8dp"
-        android:text="Odometer: -- mi" />
+        <!-- ================= DASHBOARD TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollDashboard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#33000000"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-    <TextView
-        android:id="@+id/textSpeed"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:text="Speed: -- mph" />
+                <TextView
+                    android:id="@+id/textAdapterStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="#757575"
+                    android:text="No OBD adapter paired yet" />
 
-    <TextView
-        android:id="@+id/textMpg"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:layout_marginTop="8dp"
-        android:text="Instant MPG: --" />
+                <TextView
+                    android:id="@+id/textLiveStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:text="Tracking is off" />
 
-    <TextView
-        android:id="@+id/textRpm"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:layout_marginTop="8dp"
-        android:text="RPM: --" />
+                <GridLayout
+                    android:id="@+id/gridTiles"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:columnCount="2" />
 
-    <TextView
-        android:id="@+id/textCoolant"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:layout_marginTop="8dp"
-        android:text="Coolant temp: --" />
+                <Button
+                    android:id="@+id/buttonEditDashboard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Edit Dashboard" />
 
-    <TextView
-        android:id="@+id/textTrip"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="16sp"
-        android:layout_marginTop="16dp"
-        android:text="Trip: -- mi, -- gal, -- avg mpg" />
+                <Button
+                    android:id="@+id/buttonToggleTracking"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Start Tracking" />
 
-    <Button
-        android:id="@+id/buttonToggleTracking"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:text="Start Trip" />
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#33000000"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp" />
 
-    <Button
-        android:id="@+id/buttonResetOil"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Log Oil Change (quick)" />
+                <Button
+                    android:id="@+id/buttonPairAdapter"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Pair OBD Adapter" />
 
-    <Button
-        android:id="@+id/buttonLogMaintenance"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Log Maintenance / Upgrade + Photos" />
+                <Button
+                    android:id="@+id/buttonAutoTrackingToggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Auto-Tracking: On" />
 
-    <Button
-        android:id="@+id/buttonMaintenanceHistory"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Maintenance History" />
+                <Button
+                    android:id="@+id/buttonBackgroundAccess"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Allow background start" />
 
-    <Button
-        android:id="@+id/buttonServiceStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Service Schedule" />
+                <Button
+                    android:id="@+id/buttonDebugLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="View Debug Log" />
+            </LinearLayout>
+        </ScrollView>
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#33000000"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp" />
+        <!-- ================= SERVICE TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollService"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
 
-    <Button
-        android:id="@+id/buttonPairAdapter"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Pair OBD Adapter" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-    <Button
-        android:id="@+id/buttonAutoTrackingToggle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Auto-Tracking: On" />
+                <TextView
+                    android:id="@+id/textOilLife"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:textStyle="bold"
+                    android:text="Oil life: --%" />
 
-    <Button
-        android:id="@+id/buttonDebugLog"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="View Debug Log" />
+                <TextView
+                    android:id="@+id/textOilDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="16sp"
+                    android:text="Since last oil change: -- mi, -- engine hrs" />
 
+                <TextView
+                    android:id="@+id/textOdometer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="16sp"
+                    android:text="Odometer: -- mi" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#33000000"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/textServiceHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="Service schedule" />
+
+                <TextView
+                    android:id="@+id/textServiceList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textSize="16sp"
+                    android:lineSpacingMultiplier="1.2"
+                    android:text="Loading…" />
+
+                <Button
+                    android:id="@+id/buttonResetOil"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Log Oil Change (quick)" />
+
+                <Button
+                    android:id="@+id/buttonLogMaintenance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Log Maintenance / Upgrade + Photos" />
+
+                <Button
+                    android:id="@+id/buttonMaintenanceHistory"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Maintenance History" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
 </LinearLayout>

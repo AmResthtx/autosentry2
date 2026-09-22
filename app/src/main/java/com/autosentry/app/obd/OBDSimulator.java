@@ -35,6 +35,21 @@ public class OBDSimulator {
     }
 
     /**
+     * Raw Mode 01 data bytes for a PID, shaped like the real adapter's
+     * answer so the same decoders run against simulated data.
+     */
+    public int[] readPid(int pid) {
+        switch (pid) {
+            case 0x0C: { int raw = readRPM() * 4; return new int[]{raw >> 8, raw & 0xFF}; }
+            case 0x05: return new int[]{readCoolantTemp() + 40};
+            case 0x10: { int raw = Math.round(readMAF() * 100); return new int[]{raw >> 8, raw & 0xFF}; }
+            case 0x0D: return new int[]{0};
+            case 0x42: { int mv = readBatteryVoltage(); return new int[]{mv >> 8, mv & 0xFF}; }
+            default: return new int[]{100 + random.nextInt(20), random.nextInt(256)};
+        }
+    }
+
+    /**
      * Simulates reading battery voltage (millivolts).
      */
     public int readBatteryVoltage() {

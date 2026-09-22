@@ -8,6 +8,7 @@ import android.util.Log;
 
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
+import com.autosentry.app.util.AppLog;
 
 /**
  * The "effortless" half of tracking: this is a manifest-registered receiver,
@@ -44,9 +45,13 @@ public class BluetoothConnectionReceiver extends BroadcastReceiver {
 
         if (action.equals(BluetoothDevice.ACTION_ACL_CONNECTED)) {
             Log.i(TAG, "OBD adapter connected, auto-starting tracking");
-            Intent serviceIntent = new Intent(context, TrackingService.class);
-            serviceIntent.putExtra(TrackingService.EXTRA_ADAPTER_ADDRESS, savedAddress);
-            context.startForegroundService(serviceIntent);
+            try {
+                context.startForegroundService(new Intent(context, TrackingService.class));
+            } catch (RuntimeException e) {
+                // Android 12+ blocks this while the app is in the background unless the
+                // app is exempt from battery optimization. Log it so it isn't a silent failure.
+                AppLog.e(context, TAG, "Android blocked auto-start; allow background use from the dashboard", e);
+            }
         } else {
             Log.i(TAG, "OBD adapter disconnected, auto-stopping tracking");
             context.stopService(new Intent(context, TrackingService.class));

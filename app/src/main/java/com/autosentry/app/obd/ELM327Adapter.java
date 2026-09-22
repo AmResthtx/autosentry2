@@ -30,9 +30,12 @@ public class ELM327Adapter {
 
     public ELM327Adapter() {}
 
+    public void setAdapterAddress(String adapterAddress) {
+        this.adapterAddress = adapterAddress;
+    }
+
     public boolean connect() throws IOException, InterruptedException {
         if (connected) disconnect();
-        // adapterAddress must be set via constructor or setter before connect()
         if (this.adapterAddress == null || this.adapterAddress.isEmpty()) {
             throw new IOException("Adapter address not set — pass via ELM327Adapter(address) constructor");
         }
@@ -50,9 +53,8 @@ public class ELM327Adapter {
         outputStream = socket.getOutputStream();
         connected = true;
 
-        // Initialize adapter: reset, echo off, headers off, spaces off, linefeeds off
         sendCommand("AT Z");
-        readResponse(); // reset response
+        readResponse();
         Thread.sleep(100);
         sendCommand("AT E0");
         sendCommand("AT L0");
@@ -60,11 +62,7 @@ public class ELM327Adapter {
         sendCommand("AT H0");
         sendCommand("AT CAF0");
         sendCommand("AT CFC0");
-        sendCommand("AT CRA 7E8");
-        sendCommand("AT CSM 1");
-        sendCommand("AT SH 7E0");
         sendCommand("AT SP 6");
-        sendCommand("AT DP");
 
         return true;
     }
@@ -88,42 +86,39 @@ public class ELM327Adapter {
     }
 
     public int readRPM() throws IOException {
-        sendCommand("01 0C");
-        String response = readResponse();
+        String response = readPid("01 0C");
         return parseRPMResponse(response);
     }
 
     public int readCoolantTemp() throws IOException {
-        sendCommand("01 05");
-        String response = readResponse();
+        String response = readPid("01 05");
         return parseTempResponse(response);
     }
 
-    /**
-     * Mass Air Flow rate, PID 01 10. Response bytes A,B -> ((A*256)+B)/100 grams/sec.
-     * Used by MpgCalculator to derive real-time fuel flow.
-     */
     public float readMAF() throws IOException {
-        sendCommand("01 10");
-        String response = readResponse();
+        String response = readPid("01 10");
         return parseMAFResponse(response);
     }
 
-    public int readICPFahrenheit() throws IOException {
-        // Enhanced PID for 7.3L Powerstroke: ICP in MPa, then converted
-        sendCommand("22 11 93");
+    public int readEngineLoad() throws IOException {
+        String response = readPid("01 04");
+        return parseSingleByteResponse(response);
+    }
+
+    public int readBatteryVoltage() throws IOException {
+        String response = readPid("01 42");
+        return parseBatteryVoltageResponse(response);
+    }
+
+    public String readPid(String pid) throws IOException {
+        sendCommand(pid);
         String response = readResponse();
-        float mpa = parseFloatResponse(response);
-        // Conversion approximation: MPa to PSI roughly, but keep in native unit
-        // For display we'll handle conversion in MainActivity / dashboard
-        int value = (int)(mpa * 100); // store scaled value
-        return value;
+        return response;
     }
 
     public void sendCommand(String cmd) throws IOException {
         if (outputStream == null) throw new IOException("Not connected to adapter");
-        String fullCmd = cmd + "\r";
-        outputStream.write(fullCmd.getBytes());
+        outputStream.write((cmd + "\r").getBytes());
         outputStream.flush();
     }
 
@@ -131,96 +126,60 @@ public class ELM327Adapter {
         if (inputStream == null) throw new IOException("Not connected");
         StringBuilder response = new StringBuilder();
         byte[] buffer = new byte[1024];
-        int read = inputStream.read(buffer);
-        while (read > 0) {
+        long deadline = System.currentTimeMillis() + 2000L;
+
+        while (System.currentTimeMillis() < deadline) {
+            int available = inputStream.available();
+            if (available <= 0) {
+                Thread.sleep(25);
+                continue;
+            }
+            int read = inputStream.read(buffer, 0, Math.min(available, buffer.length));
+            if (read <= 0) continue;
             response.append(new String(buffer, 0, read));
-            // Break when we see prompt (>)
             if (response.toString().contains(">")) {
                 break;
             }
-            read = inputStream.read(buffer);
         }
+
         return response.toString();
     }
 
     private int parseRPMResponse(String response) {
-        // Response format: "41 0C XX XX >"
-        // Formula: ((A*256)+B)/4
         try {
-            String clean = response.replaceAll(">", "").trim();
-            String[] lines = clean.split("\\r?\\n");
-            for (String line : lines) {
-                if (line.contains("41 0C")) {
-                    String[] parts = line.trim().split("\\s+");
-                    // Find bytes after "41 0C"
-                    boolean foundHeader = false;
-                    int aVal = 0, bVal = 0;
-                    for (String part : parts) {
-                        if (part.equals("41")) { foundHeader = true; continue; }
-                        if (foundHeader && part.equals("0C")) { continue; }
-                        if (foundHeader && aVal == 0 && !part.equals("0C")) {
-                            aVal = Integer.parseInt(part, 16);
-                        } else if (foundHeader && aVal > 0 && bVal == 0 && !part.equals("0C")) {
-                            bVal = Integer.parseInt(part, 16);
-                        }
-                    }
-                    return ((aVal * 256) + bVal) / 4;
-                }
-            }
-            // Default: try to extract any hex pair
-            String hexPart = clean.replaceAll("[^0-9A-Fa-f\\s]", "").trim();
-            String[] hexVals = hexPart.split("\\s+");
-            if (hexVals.length >= 2) {
-                int a = Integer.parseInt(hexVals[0], 16);
-                int b = Integer.parseInt(hexVals[1], 16);
+            String[] values = extractHexValues(response);
+            int idx = findHeader(values, "41", "0C");
+            if (idx >= 0 && idx + 3 < values.length) {
+                int a = parseHexByte(values[idx + 2]);
+                int b = parseHexByte(values[idx + 3]);
                 return ((a * 256) + b) / 4;
             }
         } catch (Exception e) {
             Log.e(TAG, "Parse RPM error", e);
         }
-        return 0; // Fallback
+        return 0;
     }
 
     private int parseTempResponse(String response) {
-        // Formula: A - 40 (Celsius); converted to F in dashboard layer
         try {
-            String hexPart = response.replaceAll("[^0-9A-Fa-f\\s]", "").trim();
-            String[] hexVals = hexPart.split("\\s+");
-            if (hexVals.length >= 1) {
-                int a = Integer.parseInt(hexVals[0], 16);
-                return a - 40; // Celsius value returned; MainActivity converts to F
+            String[] values = extractHexValues(response);
+            int idx = findHeader(values, "41", "05");
+            if (idx >= 0 && idx + 2 < values.length) {
+                return parseHexByte(values[idx + 2]) - 40;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Parse temp error", e);
+            Log.e(TAG, "Parse coolant temp error", e);
         }
         return -1;
     }
 
     private float parseMAFResponse(String response) {
         try {
-            String clean = response.replaceAll(">", "").trim();
-            String[] lines = clean.split("\\r?\\n");
-            for (String line : lines) {
-                if (line.contains("41 10")) {
-                    String[] parts = line.trim().split("\\s+");
-                    boolean foundHeader = false;
-                    int aVal = -1, bVal = -1;
-                    for (String part : parts) {
-                        if (part.equals("41")) { foundHeader = true; continue; }
-                        if (foundHeader && aVal == -1 && part.equals("10")) { continue; }
-                        if (foundHeader && aVal == -1) { aVal = Integer.parseInt(part, 16); }
-                        else if (foundHeader && aVal != -1 && bVal == -1) { bVal = Integer.parseInt(part, 16); }
-                    }
-                    if (aVal >= 0 && bVal >= 0) {
-                        return ((aVal * 256) + bVal) / 100f;
-                    }
-                }
-            }
-            String hexPart = clean.replaceAll("[^0-9A-Fa-f\\s]", "").trim();
-            String[] hexVals = hexPart.split("\\s+");
-            if (hexVals.length >= 2) {
-                int a = Integer.parseInt(hexVals[0], 16);
-                int b = Integer.parseInt(hexVals[1], 16);
+            String[] values = extractHexValues(response);
+            int idx = findHeader(values, "41", "10");
+            if (idx >= 0 && idx + 3 < values.length) {
+                int a = parseHexByte(values[idx + 2]);
+                int b = parseHexByte(values[idx + 3]);
                 return ((a * 256) + b) / 100f;
             }
         } catch (Exception e) {
@@ -229,18 +188,59 @@ public class ELM327Adapter {
         return 0f;
     }
 
-    private float parseFloatResponse(String response) {
+    private int parseBatteryVoltageResponse(String response) {
         try {
-            String hexPart = response.replaceAll("[^0-9A-Fa-f\\s]", "").trim();
-            String[] hexVals = hexPart.split("\\s+");
-            if (hexVals.length >= 2) {
-                int a = Integer.parseInt(hexVals[0], 16);
-                int b = Integer.parseInt(hexVals[1], 16);
-                return ((a * 256) + b) * 0.001f;
+            String[] values = extractHexValues(response);
+            int idx = findHeader(values, "41", "42");
+            if (idx >= 0 && idx + 3 < values.length) {
+                int a = parseHexByte(values[idx + 2]);
+                int b = parseHexByte(values[idx + 3]);
+                return ((a * 256) + b) / 1000;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Parse float error", e);
+            Log.e(TAG, "Parse battery voltage error", e);
         }
-        return 0f;
+        return 0;
+    }
+
+    private int parseSingleByteResponse(String response) {
+        try {
+            String[] values = extractHexValues(response);
+            int idx = findHeader(values, "41", "04");
+            if (idx >= 0 && idx + 2 < values.length) {
+                return parseHexByte(values[idx + 2]);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Parse single byte response error", e);
+        }
+        return 0;
+    }
+
+    private int findHeader(String[] values, String... expected) {
+        if (values == null || expected == null) return -1;
+        for (int i = 0; i <= values.length - expected.length; i++) {
+            boolean matched = true;
+            for (int j = 0; j < expected.length; j++) {
+                if (!values[i + j].equalsIgnoreCase(expected[j])) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return i;
+        }
+        return -1;
+    }
+
+    private String[] extractHexValues(String fullResponse) {
+        String cleaned = fullResponse
+                .replaceAll("[>\\r\\n]", " ")
+                .replaceAll("[^0-9A-Fa-f\\s]", " ")
+                .trim();
+        if (cleaned.isEmpty()) return new String[0];
+        return cleaned.split("\\s+");
+    }
+
+    private int parseHexByte(String value) {
+        return Integer.parseInt(value, 16);
     }
 }

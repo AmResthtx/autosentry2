@@ -1,0 +1,97 @@
+name: AutoSentry Build & Release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -e
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/android-sdk}"
+          mkdir -p "$ANDROID_SDK_ROOT"
+
+          # install SDK tools if they are not present
+          if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "cmdline-tools missing; installing"
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+            cd "$ANDROID_SDK_ROOT/cmdline-tools"
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
+            unzip -q tools.zip
+            rm tools.zip
+            mv cmdline-tools latest
+          fi
+
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmdline-tools;latest"
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: 9.0.0
+          cache-read-only: false
+
+      - name: Build APK (Release)
+        shell: bash
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: ./gradlew :app:assembleRelease --stacktrace --info
+
+      - name: Build APK (Debug)
+        shell: bash
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: ./gradlew :app:assembleDebug --stacktrace --info
+
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          test -f app/build/outputs/apk/release/app-release.apk || (echo "Release APK missing"; exit 1)
+          ls -lh app/build/outputs/apk/release/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: autosentry-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: autosentry-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Lint / Check code
+        shell: bash
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: ./gradlew :app:lintRelease

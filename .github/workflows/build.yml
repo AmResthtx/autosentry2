@@ -27,13 +27,15 @@ jobs:
       - name: Locate sdkmanager
         id: sdk
         run: |
-          SDKMANAGER=$(find "${ANDROID_SDK_ROOT}" -name sdkmanager -type f 2>/dev/null | sort -V | tail -n1)
+          SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "${ANDROID_SDK_ROOT}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -n1)
+          fi
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager not found under ${ANDROID_SDK_ROOT}" >&2
+            echo "sdkmanager not found under ${ANDROID_SDK_ROOT}/cmdline-tools" >&2
             find "${ANDROID_SDK_ROOT}" -maxdepth 4 >&2 || true
             exit 1
           fi
-          chmod +x "$SDKMANAGER"
           echo "sdkmanager=${SDKMANAGER}" >> "$GITHUB_OUTPUT"
 
       - name: Accept Android SDK licenses

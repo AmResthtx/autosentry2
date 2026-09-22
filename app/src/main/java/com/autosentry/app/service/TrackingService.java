@@ -2,11 +2,9 @@ package com.autosentry.app.service;
 
 import android.app.Service;
 import android.content.Intent;
-import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -35,7 +33,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Foreground service that runs for the life of a trip: polls the OBD adapter
- * (RPM, coolant temp, MAF) roughly once a second, takes GPS fixes for speed
+ * (RPM, engine oil temp, MAF) roughly once a second, takes GPS fixes for speed
  * and distance, and on every tick:
  *   1. advances the session's distance/fuel/mpg totals
  *   2. advances the vehicle profile's odometer + oil life
@@ -113,12 +111,13 @@ public class TrackingService extends Service {
         if (useRealAdapter) {
             try {
                 realAdapter.connect();
+                updateNotification("Monitoring active");
                 AppLog.i(this, TAG, "Connected to OBD adapter");
             } catch (Exception e) {
                 AppLog.e(this, TAG, "OBD connect failed; real monitoring unavailable", e);
                 useRealAdapter = false;
                 if (!AppSettings.isSimulatorModeEnabled(this)) {
-                    updateNotification("Waiting for OBD adapter");
+                    updateNotification("Waiting for key-on / OBD adapter");
                 }
             }
         }
@@ -138,14 +137,18 @@ public class TrackingService extends Service {
         ioExecutor.execute(() -> {
             try {
                 int rpm = 0;
-                int coolantC = -40;
+                int oilTempC = -40;
                 float maf = 0f;
                 boolean haveRealReadings = false;
+                boolean engineTempUnavailable = false;
 
                 if (useRealAdapter && realAdapter != null && realAdapter.isConnected()) {
                     try {
                         rpm = realAdapter.readRPM();
-                        coolantC = realAdapter.readCoolantTemp();
+                        oilTempC = realAdapter.readEngineOilTemp();
+                        if (oilTempC < 0) {
+                            engineTempUnavailable = true;
+                        }
                         maf = realAdapter.readMAF();
                         haveRealReadings = true;
                     } catch (Exception e) {
@@ -157,18 +160,18 @@ public class TrackingService extends Service {
                 if (!haveRealReadings && AppSettings.isSimulatorModeEnabled(this)) {
                     usingSimulator = true;
                     rpm = simulator.readRPM();
-                    coolantC = simulator.readCoolantTemp();
+                    oilTempC = simulator.readCoolantTemp();
                     maf = simulator.readMAF();
                     haveRealReadings = true;
                 }
 
                 if (!haveRealReadings) {
-                    updateNotification("Waiting for OBD adapter");
+                    updateNotification("Waiting for key-on / adapter");
                     mainHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
                     return;
                 }
 
-                double coolantF = coolantC * 9.0 / 5.0 + 32.0;
+                double oilTempF = (oilTempC >= 0) ? (oilTempC * 9.0 / 5.0 + 32.0) : 70.0;
                 long now = System.currentTimeMillis();
                 double dtSeconds = Math.max(0.001, (now - lastTickTimestamp) / 1000.0);
                 lastTickTimestamp = now;
@@ -183,7 +186,7 @@ public class TrackingService extends Service {
                 profile.engineHoursSinceOilChange += engineHoursDelta;
                 profile.totalFuelGallons += gallonsDelta;
                 profile.oilLifePercent = OilLifeEngine.degrade(
-                        profile.oilLifePercent, distanceDeltaMiles, profile.severeDuty, rpm, coolantF);
+                        profile.oilLifePercent, distanceDeltaMiles, profile.severeDuty, rpm, oilTempF);
                 db.vehicleProfileDao().update(profile);
 
                 checkServiceThresholds();
@@ -208,11 +211,17 @@ public class TrackingService extends Service {
                 point.instantMpg = instantMpg;
                 db.tripPointDao().insert(point);
 
-                String statusText = usingSimulator
-                        ? String.format("SIM | %.0f mph | %.1f MPG | Oil life %.0f%%",
-                                lastSpeedMph, instantMpg, profile.oilLifePercent)
-                        : String.format("%.0f mph | %.1f MPG | Oil life %.0f%%",
-                                lastSpeedMph, instantMpg, profile.oilLifePercent);
+                String statusText;
+                if (usingSimulator) {
+                    statusText = String.format("SIM | %.0f mph | %.1f MPG | Oil life %.0f%%",
+                            lastSpeedMph, instantMpg, profile.oilLifePercent);
+                } else if (engineTempUnavailable) {
+                    statusText = String.format("Monitoring | %.0f mph | %.1f MPG | Oil temp unavailable",
+                            lastSpeedMph, instantMpg);
+                } else {
+                    statusText = String.format("%.0f mph | %.1f MPG | Oil %.0fF | Oil life %.0f%%",
+                            lastSpeedMph, instantMpg, oilTempF, profile.oilLifePercent);
+                }
                 updateNotification(statusText);
             } catch (Exception e) {
                 AppLog.e(this, TAG, "Poll tick failed", e);

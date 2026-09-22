@@ -20,6 +20,8 @@ public final class PidCatalog {
     public static final int COOLANT = 0x05;
     public static final int MAF = 0x10;
     public static final int FUEL_RATE = 0x5E;
+    /** Standard Mode 01 id; on the 7.3L the value comes from Ford's enhanced PID instead. */
+    public static final int ENGINE_OIL_TEMP = 0x5C;
 
     public static final int COMPUTED_INSTANT_MPG = 0x1000;
     public static final int COMPUTED_TRIP_MPG = 0x1001;

@@ -24,6 +24,7 @@ import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.notifications.NotificationUtils;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.OBDSimulator;
+import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
 
 import java.util.EnumSet;
@@ -37,12 +38,11 @@ import java.util.concurrent.Executors;
  * (RPM, coolant temp, MAF) roughly once a second, takes GPS fixes for speed
  * and distance, and on every tick:
  *   1. advances the session's distance/fuel/mpg totals
- *   2. advances the vehicle profile's odometer + oil life (this is the part
- *      the old app never did — oil life must move every tick, not just once)
+ *   2. advances the vehicle profile's odometer + oil life
  *   3. persists a TripPoint row for history/graphing
  *
- * Uses OBDSimulator when no adapter address is configured, so the app is
- * testable without hardware attached.
+ * Production mode requires a real adapter. The simulator is only allowed when
+ * explicitly enabled in settings for testing.
  */
 public class TrackingService extends Service {
     private static final String TAG = "TrackingService";
@@ -57,11 +57,10 @@ public class TrackingService extends Service {
     private ELM327Adapter realAdapter;
     private OBDSimulator simulator;
     private boolean useRealAdapter;
+    private boolean usingSimulator;
 
     private Session activeSession;
     private VehicleProfile profile;
-    // Avoids re-notifying every second once an item crosses 80%; cleared
-    // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
 
     private volatile double lastSpeedMph = 0;
@@ -83,14 +82,13 @@ public class TrackingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String adapterAddress = intent != null ? intent.getStringExtra(EXTRA_ADAPTER_ADDRESS) : null;
         useRealAdapter = adapterAddress != null && !adapterAddress.isEmpty();
+        usingSimulator = false;
         if (useRealAdapter) {
             realAdapter = new ELM327Adapter(adapterAddress);
         }
 
-        startForeground(NotificationUtils.TRACKING_NOTIFICATION_ID, buildNotification("Starting..."));
-
+        startForeground(NotificationUtils.TRACKING_NOTIFICATION_ID, buildNotification("Starting monitoring..."));
         ioExecutor.execute(this::startSessionAndAdapter);
-
         return START_STICKY;
     }
 
@@ -115,9 +113,13 @@ public class TrackingService extends Service {
         if (useRealAdapter) {
             try {
                 realAdapter.connect();
+                AppLog.i(this, TAG, "Connected to OBD adapter");
             } catch (Exception e) {
-                AppLog.e(this, TAG, "OBD connect failed, falling back to simulator", e);
+                AppLog.e(this, TAG, "OBD connect failed; real monitoring unavailable", e);
                 useRealAdapter = false;
+                if (!AppSettings.isSimulatorModeEnabled(this)) {
+                    updateNotification("Waiting for OBD adapter");
+                }
             }
         }
 
@@ -135,20 +137,38 @@ public class TrackingService extends Service {
     private void pollTick() {
         ioExecutor.execute(() -> {
             try {
-                int rpm;
-                int coolantC;
-                float maf;
-                if (useRealAdapter && realAdapter.isConnected()) {
-                    rpm = realAdapter.readRPM();
-                    coolantC = realAdapter.readCoolantTemp();
-                    maf = realAdapter.readMAF();
-                } else {
+                int rpm = 0;
+                int coolantC = -40;
+                float maf = 0f;
+                boolean haveRealReadings = false;
+
+                if (useRealAdapter && realAdapter != null && realAdapter.isConnected()) {
+                    try {
+                        rpm = realAdapter.readRPM();
+                        coolantC = realAdapter.readCoolantTemp();
+                        maf = realAdapter.readMAF();
+                        haveRealReadings = true;
+                    } catch (Exception e) {
+                        AppLog.e(this, TAG, "Failed reading OBD data; real monitoring unavailable", e);
+                        useRealAdapter = false;
+                    }
+                }
+
+                if (!haveRealReadings && AppSettings.isSimulatorModeEnabled(this)) {
+                    usingSimulator = true;
                     rpm = simulator.readRPM();
                     coolantC = simulator.readCoolantTemp();
                     maf = simulator.readMAF();
+                    haveRealReadings = true;
                 }
-                double coolantF = coolantC * 9.0 / 5.0 + 32.0;
 
+                if (!haveRealReadings) {
+                    updateNotification("Waiting for OBD adapter");
+                    mainHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+                    return;
+                }
+
+                double coolantF = coolantC * 9.0 / 5.0 + 32.0;
                 long now = System.currentTimeMillis();
                 double dtSeconds = Math.max(0.001, (now - lastTickTimestamp) / 1000.0);
                 lastTickTimestamp = now;
@@ -158,8 +178,6 @@ public class TrackingService extends Service {
                 double gallonsDelta = MpgCalculator.gallonsForInterval(maf, dtSeconds);
                 double instantMpg = MpgCalculator.instantMpg(lastSpeedMph, maf);
 
-                // This tick is the fix for the old bug: profile mutates every poll,
-                // not just once at trip start.
                 profile.odometerMiles += distanceDeltaMiles;
                 profile.milesSinceOilChange += distanceDeltaMiles;
                 profile.engineHoursSinceOilChange += engineHoursDelta;
@@ -190,9 +208,12 @@ public class TrackingService extends Service {
                 point.instantMpg = instantMpg;
                 db.tripPointDao().insert(point);
 
-                updateNotification(String.format(
-                        "%.0f mph | %.1f MPG | Oil life %.0f%%",
-                        lastSpeedMph, instantMpg, profile.oilLifePercent));
+                String statusText = usingSimulator
+                        ? String.format("SIM | %.0f mph | %.1f MPG | Oil life %.0f%%",
+                                lastSpeedMph, instantMpg, profile.oilLifePercent)
+                        : String.format("%.0f mph | %.1f MPG | Oil life %.0f%%",
+                                lastSpeedMph, instantMpg, profile.oilLifePercent);
+                updateNotification(statusText);
             } catch (Exception e) {
                 AppLog.e(this, TAG, "Poll tick failed", e);
             }
@@ -201,13 +222,6 @@ public class TrackingService extends Service {
         });
     }
 
-    /**
-     * Checks every tracked item against Ford's manufacturer intervals and
-     * fires a one-time notification the first time each crosses 80% of its
-     * service life (MaintenanceScheduleEngine.DUE_SOON_THRESHOLD_PERCENT).
-     * Re-arms automatically once the item is logged serviced, because that
-     * moves ServiceStatus.milesSinceService back to 0.
-     */
     private void checkServiceThresholds() {
         List<ServiceStatus> dueSoon = MaintenanceScheduleEngine.dueSoonOrOverdue(profile, db.maintenanceDao());
         Set<ServiceItemType> stillDue = EnumSet.noneOf(ServiceItemType.class);
@@ -218,7 +232,7 @@ public class TrackingService extends Service {
                 postServiceAlert(status);
             }
         }
-        notifiedDueSoon.retainAll(stillDue); // clears entries once serviced
+        notifiedDueSoon.retainAll(stillDue);
     }
 
     private void postServiceAlert(ServiceStatus status) {

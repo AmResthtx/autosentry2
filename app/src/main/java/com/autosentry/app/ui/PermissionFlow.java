@@ -21,7 +21,9 @@ public final class PermissionFlow {
         List<String> perms = new ArrayList<>();
         perms.add(Manifest.permission.ACCESS_FINE_LOCATION);
         perms.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        perms.add(Manifest.permission.POST_NOTIFICATIONS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms.add(Manifest.permission.BLUETOOTH_CONNECT);
             perms.add(Manifest.permission.BLUETOOTH_SCAN);
@@ -50,23 +52,16 @@ public final class PermissionFlow {
         }
         if (!missing.isEmpty()) {
             ActivityCompat.requestPermissions(activity, missing.toArray(new String[0]), PERMISSION_REQ);
-            // BLUETOOTH_CONNECT (needed below by adapter.isEnabled() on API 31+) was
-            // just requested, not yet granted — permission results are asynchronous,
-            // so checking Bluetooth state now would crash with a SecurityException
-            // on a fresh install. Bail here; MainActivity re-checks once the app is
-            // actually used (e.g. Pair OBD Adapter), by which point the permission
-            // request has been answered.
             return;
         }
 
         try {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             if (adapter == null || !adapter.isEnabled()) {
-                Toast.makeText(activity, "Please pair your OBD adapter in Settings > Bluetooth", Toast.LENGTH_LONG).show();
+                Toast.makeText(activity, "Enable Bluetooth and pair your OBD adapter in Settings", Toast.LENGTH_LONG).show();
             }
-        } catch (SecurityException e) {
-            // Defensive: some OEM builds enforce BLUETOOTH_CONNECT even in paths
-            // Android's own docs don't require it for. Not fatal either way.
+        } catch (SecurityException ignored) {
+            // The caller will receive the normal permission/connection error when pairing.
         }
     }
 }

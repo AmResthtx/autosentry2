@@ -2,39 +2,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.autosentry.app">
 
-    <!-- Bluetooth for OBD-II adapters -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-
-    <!-- Keeps the CPU awake while tracking so polling doesn't stop when the screen turns off -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- GPS for speed/distance -> MPG and trip tracking -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Foreground service for long OBD + GPS tracking sessions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-
-    <!--
-      Lets the user exempt the app from battery optimization, which is what
-      allows Android 12+ to start tracking from the Bluetooth receiver while
-      the app is closed.
-    -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Internet for future cloud sync / parts lookup -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Camera for photographing receipts/parts on maintenance & upgrade events -->
     <uses-permission android:name="android.permission.CAMERA" />
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -54,18 +36,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".ui.DebugLogActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ui.LogMaintenanceActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ui.MaintenanceHistoryActivity"
-            android:exported="false" />
+        <activity android:name=".ui.DebugLogActivity" android:exported="false" />
+        <activity android:name=".ui.LogMaintenanceActivity" android:exported="false" />
+        <activity android:name=".ui.MaintenanceHistoryActivity" android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -77,17 +50,12 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- GPS is a real fallback for distance/speed when the vehicle does not expose speed. -->
         <service
             android:name=".service.TrackingService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
 
-        <!--
-          Manifest-registered (not runtime) so Android delivers Bluetooth
-          connect/disconnect events even when the app isn't running — this
-          is what makes tracking start just by walking up with the phone
-          in your pocket.
-        -->
         <receiver
             android:name=".receiver.BluetoothConnectionReceiver"
             android:exported="true">
@@ -96,7 +64,5 @@
                 <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
             </intent-filter>
         </receiver>
-
     </application>
-
 </manifest>

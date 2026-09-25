@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release on master pushes
 
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -59,18 +61,19 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: autosentry-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: autosentry-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+      # Every master push becomes a Release with the APK attached directly (no zip),
+      # named to match the version shown in the app's title bar.
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          BUILD=${{ github.run_number }}
+          TAG="v${VERSION}-build${BUILD}"
+          APK="AutoSentry-${TAG}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          gh release create "$TAG" "$APK" \
+            --target "${{ github.sha }}" \
+            --title "AutoSentry v${VERSION} (build ${BUILD})" \
+            --notes "Tap ${APK} on the phone to install. Built from ${{ github.sha }}."

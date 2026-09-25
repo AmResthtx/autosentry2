@@ -26,6 +26,10 @@ public final class PidCatalog {
     public static final int COMPUTED_TRIP_MPG = 0x1001;
     public static final int COMPUTED_TRIP_MILES = 0x1002;
     public static final int COMPUTED_ODOMETER = 0x1003;
+    /** Seconds since the trip started (engine on), shown as h:mm:ss. */
+    public static final int COMPUTED_TRIP_TIME = 0x1004;
+
+    private static final String DURATION_FORMAT = "duration";
 
     public interface Decoder {
         double decode(int[] b);
@@ -58,6 +62,10 @@ public final class PidCatalog {
 
         public String formatValue(double value) {
             if (Double.isNaN(value)) return "--";
+            if (DURATION_FORMAT.equals(format)) {
+                long seconds = Math.round(value);
+                return String.format(java.util.Locale.US, "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+            }
             return String.format(java.util.Locale.US, format, value);
         }
 
@@ -106,6 +114,7 @@ public final class PidCatalog {
         computed(COMPUTED_INSTANT_MPG, "Instant MPG", "mpg", "%.1f");
         computed(COMPUTED_TRIP_MPG, "Trip Average MPG", "mpg", "%.1f");
         computed(COMPUTED_TRIP_MILES, "Trip Distance", "mi", "%.1f");
+        computed(COMPUTED_TRIP_TIME, "Trip Time", "", DURATION_FORMAT);
         computed(COMPUTED_ODOMETER, "Odometer", "mi", "%.1f");
     }
 

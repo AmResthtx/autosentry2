@@ -71,6 +71,10 @@ public class TrackingService extends Service {
     private static final double MAX_TICK_SECONDS = 5.0;
     // Renewed on every poll tick so it never outlives the service, but survives any one gap.
     private static final long WAKE_LOCK_TIMEOUT_MS = 60_000L;
+    // A missed first answer (bus still waking up) must not hide oil temp for the whole drive.
+    private static final long OIL_PROBE_RETRY_MS = 30_000L;
+    // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
+    private static final long OIL_READ_INTERVAL_MS = 2_000L;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -87,6 +91,9 @@ public class TrackingService extends Service {
     private Set<Integer> supportedPids = Collections.emptySet();
     // True when the truck answers Ford's enhanced oil-temp PID (7.3L) instead of the standard one.
     private boolean fordOilTemp = false;
+    private boolean pwmBus = false;
+    private long lastOilProbe = 0;
+    private long lastOilRead = 0;
     // Avoids re-notifying every tick once an item crosses 80%; cleared
     // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
@@ -281,17 +288,35 @@ public class TrackingService extends Service {
             return false;
         }
         supportedPids = found;
-        fordOilTemp = !found.contains(PidCatalog.ENGINE_OIL_TEMP)
+        String protocol = realAdapter.describeProtocol();
+        pwmBus = protocol.toUpperCase(java.util.Locale.US).contains("PWM");
+        probeFordOilTemp();
+        AppLog.i(this, TAG, "Truck answered on " + protocol
+                + "; supported PIDs: " + describePids(found)
+                + "; Ford oil temp (22 1310): " + describeOilTempSource());
+        return true;
+    }
+
+    /**
+     * Standard Mode 01 oil temp when the truck has it; otherwise Ford's enhanced PID,
+     * which only exists on the J1850 PWM bus. Also offers "Engine Oil Temp" in the
+     * dashboard editor when either source works.
+     */
+    private void probeFordOilTemp() throws IOException {
+        lastOilProbe = System.currentTimeMillis();
+        fordOilTemp = pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)
                 && !Double.isNaN(realAdapter.readFordEngineOilTempC());
-        // Offer "Engine Oil Temp" in the dashboard editor when either source works.
-        Set<Integer> offered = new LinkedHashSet<>(found);
+        Set<Integer> offered = new LinkedHashSet<>(supportedPids);
         if (fordOilTemp) offered.add(PidCatalog.ENGINE_OIL_TEMP);
         LiveReadings.supported = offered;
         AppSettings.setSupportedPids(this, offered);
-        AppLog.i(this, TAG, "Truck answered on " + realAdapter.describeProtocol()
-                + "; supported PIDs: " + describePids(found)
-                + "; Ford enhanced oil temp: " + (fordOilTemp ? "yes" : "no"));
-        return true;
+    }
+
+    private String describeOilTempSource() {
+        if (supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)) return "not needed, standard PID 5C answers";
+        if (!pwmBus) return "not tried, bus is not J1850 PWM";
+        if (fordOilTemp) return "yes";
+        return "no answer, reply '" + realAdapter.lastEnhancedReply() + "' (retrying every 30 s)";
     }
 
     private void handleLinkLoss() {
@@ -321,7 +346,14 @@ public class TrackingService extends Service {
                 LiveReadings.values.put(id, value);
             }
         }
-        if (fordOilTemp) {
+        long now = System.currentTimeMillis();
+        if (!fordOilTemp && pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)
+                && now - lastOilProbe >= OIL_PROBE_RETRY_MS) {
+            probeFordOilTemp();
+            if (fordOilTemp) AppLog.i(this, TAG, "Ford oil temp (22 1310) is answering now");
+        }
+        if (fordOilTemp && now - lastOilRead >= OIL_READ_INTERVAL_MS) {
+            lastOilRead = now;
             double oilC = realAdapter.readFordEngineOilTempC();
             if (Double.isNaN(oilC)) {
                 LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
@@ -330,7 +362,6 @@ public class TrackingService extends Service {
             }
         }
 
-        long now = System.currentTimeMillis();
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
         boolean engineRunning = rpm != null && rpm > 0;
 
@@ -399,6 +430,7 @@ public class TrackingService extends Service {
             LiveReadings.values.remove(PidCatalog.COMPUTED_TRIP_MPG);
         }
         LiveReadings.values.put(PidCatalog.COMPUTED_TRIP_MILES, activeSession.distanceMiles);
+        LiveReadings.values.put(PidCatalog.COMPUTED_TRIP_TIME, (now - activeSession.startTimestamp) / 1000.0);
         LiveReadings.values.put(PidCatalog.COMPUTED_ODOMETER, profile.odometerMiles + pendingMiles);
 
         if (now - lastPersistTimestamp >= PERSIST_INTERVAL_MS) {

@@ -18,6 +18,8 @@ public final class AppSettings {
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
+    // Set once Trip Time has been put on a saved dashboard (or the user saved their own).
+    private static final String KEY_TRIP_TIME_ADDED = "trip_time_added";
     // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
     private static final int REMOVED_COOLANT_PID = 0x05;
 
@@ -62,6 +64,7 @@ public final class AppSettings {
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MILES);
+            defaults.add(PidCatalog.COMPUTED_TRIP_TIME);
             return defaults;
         }
         List<Integer> ids = parseIds(stored);
@@ -73,11 +76,16 @@ public final class AppSettings {
                 ids.set(coolant, PidCatalog.ENGINE_OIL_TEMP);
             }
         }
+        if (!prefs(context).getBoolean(KEY_TRIP_TIME_ADDED, false)) {
+            if (!ids.contains(PidCatalog.COMPUTED_TRIP_TIME)) ids.add(PidCatalog.COMPUTED_TRIP_TIME);
+            setDashboardPids(context, ids);
+        }
         return ids;
     }
 
     public static void setDashboardPids(Context context, List<Integer> pids) {
-        prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids)).apply();
+        prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids))
+                .putBoolean(KEY_TRIP_TIME_ADDED, true).apply();
     }
 
     public static Set<Integer> getSupportedPids(Context context) {

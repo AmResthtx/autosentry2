@@ -31,7 +31,13 @@ public class ELM327Adapter {
     private static final long BUS_INIT_TIMEOUT_MS = 15000L;
     private static final long PID_TIMEOUT_MS = 2500L;
 
+    // Ford enhanced (Mode 22) PIDs on J1850 PWM answer only when addressed to the PCM (0x10)
+    // from the tester (F1); Mode 01 needs the functional OBD header back afterwards.
+    private static final String FORD_PCM_HEADER = "ATSHC410F1";
+    private static final String OBD_PWM_HEADER = "ATSH616AF1";
+
     private BluetoothSocket socket = null;
+    private String lastEnhancedReply = "";
     private InputStream inputStream = null;
     private OutputStream outputStream = null;
     private String adapterAddress = null;
@@ -164,13 +170,31 @@ public class ELM327Adapter {
     }
 
     /**
-     * Ford enhanced engine oil temperature (Mode 22, PID 194F) for the 2000 7.3L
-     * Power Stroke, which doesn't answer the standard Mode 01 oil-temp PID.
-     * Returns Celsius, or NaN when the truck had no answer.
+     * Ford enhanced engine oil temperature (Mode 22, PID 1310, scaled (A*256+B)/100 - 40 °C)
+     * for the 7.3L Power Stroke on J1850 PWM, which doesn't answer the standard Mode 01
+     * oil-temp PID. Returns Celsius, or NaN when the truck had no usable answer.
      */
     public synchronized double readFordEngineOilTempC() throws IOException {
-        int[] data = parseReply(command("22194F", PID_TIMEOUT_MS), "62194F");
-        return (data == null || data.length < 1) ? Double.NaN : data[0] - 40;
+        String reply;
+        command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        try {
+            reply = command("221310", PID_TIMEOUT_MS);
+        } finally {
+            command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
+        }
+        lastEnhancedReply = reply.replace(">", "").replaceAll("\\s+", " ").trim();
+        return decodeFordOilTempC(parseReply(reply, "621310"));
+    }
+
+    /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
+    public synchronized String lastEnhancedReply() {
+        return lastEnhancedReply;
+    }
+
+    static double decodeFordOilTempC(int[] data) {
+        if (data == null || data.length < 2) return Double.NaN;
+        double celsius = (data[0] * 256 + data[1]) / 100.0 - 40;
+        return celsius > 200 ? Double.NaN : celsius; // beyond any real oil temp: open/shorted sensor
     }
 
     static int[] parseMode01(String response, int pid) {

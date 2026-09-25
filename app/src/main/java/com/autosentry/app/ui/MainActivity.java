@@ -104,6 +104,9 @@ public class MainActivity extends AppCompatActivity {
         buttonBackgroundAccess = findViewById(R.id.buttonBackgroundAccess);
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
         buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
+        }
 
         if (savedInstanceState == null) {
             PermissionFlow.requestMissingPermissions(this);
@@ -189,13 +192,13 @@ public class MainActivity extends AppCompatActivity {
         lastDbRefresh = 0; // refresh the service tab right away
     }
 
-    /** Start/stop by hand. Without a paired adapter, debug builds run the labeled simulator; release builds ask to pair. */
+    /** Start/stop by hand. Without a paired adapter this opens pairing instead. */
     private void toggleTracking() {
         if (TrackingService.isRunning) {
             stopService(new Intent(this, TrackingService.class));
             return;
         }
-        if (!AppSettings.hasObdAdapterConfigured(this) && !BuildConfig.DEBUG) {
+        if (!AppSettings.hasObdAdapterConfigured(this)) {
             Toast.makeText(this, "Pair your OBD adapter first", Toast.LENGTH_SHORT).show();
             pickObdAdapter();
             return;
@@ -263,7 +266,7 @@ public class MainActivity extends AppCompatActivity {
                     AppSettings.setAutoTrackingEnabled(this, true);
                     Toast.makeText(this, "Paired: " + name + ". Tracking will now start automatically when it connects.", Toast.LENGTH_LONG).show();
                     refreshAdapterStatusUi();
-                    // Restart so a running simulator session switches over to the real adapter.
+                    // Restart so a running session switches over to the newly chosen adapter.
                     if (TrackingService.isRunning) stopService(new Intent(this, TrackingService.class));
                     uiHandler.postDelayed(this::maybeAutoStartTracking, 800L);
                 })
@@ -393,8 +396,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateLiveStatus() {
         boolean running = TrackingService.isRunning;
-        String startLabel = AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking"
-                : (BuildConfig.DEBUG ? "Start Tracking (simulated data)" : "Start Tracking (pair adapter first)");
+        String startLabel = AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking" : "Start Tracking (pair adapter first)";
         buttonToggleTracking.setText(running ? "Stop Tracking" : startLabel);
         textLiveStatus.setText(LiveReadings.status);
     }

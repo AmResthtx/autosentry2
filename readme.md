@@ -76,7 +76,7 @@ This keeps the maintenance notebook useful without pretending that a mileage est
 ## Architecture
 
 ```
-obd/            ELM327Adapter, OBDSimulator (debug builds only), DTCReader, VINDetector
+obd/            ELM327Adapter, DTCReader, VINDetector
                 — adapter communication, vehicle responses, and code decoding
 engine/         OilLifeEngine — mileage, engine-hour, idle, and oil-temperature logic
 maintenance/    ServiceInterval, ServiceStatus, MaintenanceScheduleEngine
@@ -101,9 +101,7 @@ All storage is local (Room + SharedPreferences). No account or cloud dependency 
 
 Outputs to `app/build/outputs/apk/release/app-release.apk`, signed with the Android debug key (fine for sideloading onto a test device; not intended for store distribution as-is).
 
-### Testing without the truck
-
-Debug builds (`./gradlew installDebug`) with no adapter paired run a built-in simulator: 30 s idle, then 150 s at ~55 mph, repeating. Everything it produces is labeled **SIMULATED** on the dashboard and in the notification, and it writes to the same local database (odometer, trips, oil life), so use a test device. Release builds never simulate; they require a paired adapter.
+The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). CI builds use the GitHub Actions run number; local builds are build 1.
 
 ## Planned directions
 

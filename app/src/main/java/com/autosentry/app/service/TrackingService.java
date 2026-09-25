@@ -16,7 +16,6 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 
-import com.autosentry.app.BuildConfig;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
@@ -30,7 +29,6 @@ import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.notifications.NotificationUtils;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
-import com.autosentry.app.obd.OBDSimulator;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
@@ -55,9 +53,8 @@ import java.util.concurrent.RejectedExecutionException;
  *   3. saves a TripPoint about once a second
  *
  * Distance comes from the truck's own speed reading when it reports one, and
- * from GPS otherwise. OBDSimulator runs only in debug builds with no adapter
- * paired, labeled as simulated — a real adapter that fails to connect is
- * retried, never faked, and release builds never simulate.
+ * from GPS otherwise. Requires a paired adapter; one that fails to connect is
+ * retried, never faked.
  */
 public class TrackingService extends Service {
     private static final String TAG = "TrackingService";
@@ -82,8 +79,6 @@ public class TrackingService extends Service {
     private AppDatabase db;
     private GpsTracker gpsTracker;
     private ELM327Adapter realAdapter;
-    private OBDSimulator simulator;
-    private boolean useRealAdapter;
     private boolean started = false;
     private volatile boolean stopped = false;
 
@@ -117,7 +112,6 @@ public class TrackingService extends Service {
         super.onCreate();
         db = AppDatabase.getInstance(this);
         gpsTracker = new GpsTracker(this);
-        simulator = new OBDSimulator();
         NotificationUtils.ensureChannels(this);
 
         // Without this, the tablet suspends its CPU when the screen turns off and the
@@ -137,10 +131,6 @@ public class TrackingService extends Service {
         // The adapter comes from saved settings, not the intent, so a system
         // restart (which delivers a null intent) still talks to the real adapter.
         String adapterAddress = AppSettings.getObdAdapterAddress(this);
-        useRealAdapter = adapterAddress != null && !adapterAddress.isEmpty();
-        if (useRealAdapter) {
-            realAdapter = new ELM327Adapter(adapterAddress);
-        }
 
         try {
             startInForeground();
@@ -151,13 +141,14 @@ public class TrackingService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (!useRealAdapter && !BuildConfig.DEBUG) {
+        if (adapterAddress == null || adapterAddress.isEmpty()) {
             stopReason = "No OBD adapter paired — tap Pair OBD Adapter";
             stopSelf();
             return START_NOT_STICKY;
         }
+        realAdapter = new ELM327Adapter(adapterAddress);
         isRunning = true;
-        LiveReadings.status = useRealAdapter ? "Connecting to OBD adapter…" : "SIMULATED DATA — debug build, no adapter paired";
+        LiveReadings.status = "Connecting to OBD adapter…";
 
         ioExecutor.execute(this::initState);
         return START_STICKY;
@@ -250,7 +241,6 @@ public class TrackingService extends Service {
     }
 
     private boolean ensureConnected() {
-        if (!useRealAdapter) return true;
         if (realAdapter.isConnected()) return true;
 
         LiveReadings.clearValues();
@@ -282,11 +272,6 @@ public class TrackingService extends Service {
     /** Adapter is linked, but the truck's computer may not be awake yet (key off). */
     private boolean ensureTruckAnswering() throws IOException {
         if (!supportedPids.isEmpty()) return true;
-        if (!useRealAdapter) {
-            supportedPids = OBDSimulator.SUPPORTED;
-            LiveReadings.supported = OBDSimulator.SUPPORTED;
-            return true;
-        }
 
         Set<Integer> found = realAdapter.readSupportedPids();
         if (found.isEmpty()) {
@@ -320,7 +305,6 @@ public class TrackingService extends Service {
         Set<Integer> want = new LinkedHashSet<>(AppSettings.getDashboardPids(this));
         want.add(PidCatalog.RPM);
         want.add(PidCatalog.SPEED);
-        want.add(PidCatalog.COOLANT);
         want.add(PidCatalog.MAF);
         want.add(PidCatalog.FUEL_RATE);
         want.add(PidCatalog.ENGINE_OIL_TEMP);
@@ -329,7 +313,7 @@ public class TrackingService extends Service {
             PidCatalog.Pid def = PidCatalog.get(id);
             if (def == null || def.computed) continue;
             if (!supportedPids.contains(id)) continue;
-            int[] data = useRealAdapter ? realAdapter.readPid(id) : simulator.readPid(id);
+            int[] data = realAdapter.readPid(id);
             double value = def.decode(data);
             if (Double.isNaN(value)) {
                 LiveReadings.values.remove(id);
@@ -337,7 +321,7 @@ public class TrackingService extends Service {
                 LiveReadings.values.put(id, value);
             }
         }
-        if (useRealAdapter && fordOilTemp) {
+        if (fordOilTemp) {
             double oilC = realAdapter.readFordEngineOilTempC();
             if (Double.isNaN(oilC)) {
                 LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
@@ -363,7 +347,7 @@ public class TrackingService extends Service {
         }
         engineOffSince = 0;
         LiveReadings.engineRunning = true;
-        if (useRealAdapter) LiveReadings.status = "Engine running";
+        LiveReadings.status = "Engine running";
 
         double dtSeconds = (now - lastTickTimestamp) / 1000.0;
         lastTickTimestamp = now;
@@ -384,9 +368,8 @@ public class TrackingService extends Service {
         double gallonsDelta = gallonsPerHour * (dtSeconds / 3600.0);
         lastInstantMpg = (gallonsPerHour > 0.01 && speedMph > 0.5) ? speedMph / gallonsPerHour : 0;
 
-        // Oil life runs on engine oil temp (the 7.3L's real thermal signal); coolant only as fallback.
+        // Oil life runs on engine oil temp, the 7.3L's real thermal signal; no reading adds no heat penalty.
         Double oilTempF = LiveReadings.values.get(PidCatalog.ENGINE_OIL_TEMP);
-        Double engineTempF = oilTempF != null ? oilTempF : LiveReadings.values.get(PidCatalog.COOLANT);
 
         if (activeSession == null) startSession(now);
 
@@ -394,7 +377,7 @@ public class TrackingService extends Service {
         pendingHours += engineHoursDelta;
         pendingGallons += gallonsDelta;
         pendingOilPercent += OilLifeEngine.percentUsed(distanceDeltaMiles, profile.severeDuty,
-                rpm != null ? rpm : 0, engineTempF != null ? engineTempF : 0);
+                rpm != null ? rpm : 0, oilTempF != null ? oilTempF : 0);
 
         activeSession.distanceMiles += distanceDeltaMiles;
         activeSession.fuelGallonsUsed += gallonsDelta;
@@ -521,7 +504,6 @@ public class TrackingService extends Service {
     }
 
     private void updateNotification(String text) {
-        if (!useRealAdapter) text = "SIMULATED — " + text;
         android.app.NotificationManager manager =
                 (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {

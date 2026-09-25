@@ -18,6 +18,8 @@ public final class AppSettings {
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
+    // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
+    private static final int REMOVED_COOLANT_PID = 0x05;
 
     private AppSettings() {}
 
@@ -56,13 +58,22 @@ public final class AppSettings {
             List<Integer> defaults = new ArrayList<>();
             defaults.add(PidCatalog.RPM);
             defaults.add(PidCatalog.SPEED);
-            defaults.add(PidCatalog.COOLANT);
+            defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MILES);
             return defaults;
         }
-        return parseIds(stored);
+        List<Integer> ids = parseIds(stored);
+        int coolant = ids.indexOf(REMOVED_COOLANT_PID);
+        if (coolant >= 0) {
+            if (ids.contains(PidCatalog.ENGINE_OIL_TEMP)) {
+                ids.remove(coolant);
+            } else {
+                ids.set(coolant, PidCatalog.ENGINE_OIL_TEMP);
+            }
+        }
+        return ids;
     }
 
     public static void setDashboardPids(Context context, List<Integer> pids) {

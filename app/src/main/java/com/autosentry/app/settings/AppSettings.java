@@ -10,20 +10,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Stores the one thing auto-tracking needs to know: which paired Bluetooth
- * device is the OBD adapter. Set once via the "Pair OBD Adapter" flow, then
- * BluetoothConnectionReceiver uses it to recognize the adapter on every
- * future connect/disconnect without any user action.
- */
+/** Persistent user and vehicle settings. Live vehicle data must come from a real adapter. */
 public final class AppSettings {
     private static final String PREFS_NAME = "autosentry_settings";
     private static final String KEY_ADAPTER_ADDRESS = "obd_adapter_address";
     private static final String KEY_ADAPTER_NAME = "obd_adapter_name";
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
-    private static final String KEY_SIMULATOR_MODE_ENABLED = "simulator_mode_enabled";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
+    // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
+    private static final int REMOVED_COOLANT_PID = 0x05;
 
     private AppSettings() {}
 
@@ -32,10 +28,7 @@ public final class AppSettings {
     }
 
     public static void setObdAdapter(Context context, String address, String name) {
-        prefs(context).edit()
-                .putString(KEY_ADAPTER_ADDRESS, address)
-                .putString(KEY_ADAPTER_NAME, name)
-                .apply();
+        prefs(context).edit().putString(KEY_ADAPTER_ADDRESS, address).putString(KEY_ADAPTER_NAME, name).apply();
     }
 
     public static String getObdAdapterAddress(Context context) {
@@ -47,7 +40,8 @@ public final class AppSettings {
     }
 
     public static boolean hasObdAdapterConfigured(Context context) {
-        return getObdAdapterAddress(context) != null;
+        String address = getObdAdapterAddress(context);
+        return address != null && !address.trim().isEmpty();
     }
 
     public static void setAutoTrackingEnabled(Context context, boolean enabled) {
@@ -58,38 +52,36 @@ public final class AppSettings {
         return prefs(context).getBoolean(KEY_AUTO_TRACKING_ENABLED, true);
     }
 
-    public static void setSimulatorModeEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SIMULATOR_MODE_ENABLED, enabled).apply();
-    }
-
-    public static boolean isSimulatorModeEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_SIMULATOR_MODE_ENABLED, false);
-    }
-
-    /** Which readings the dashboard shows, in display order. Set from the "Edit Dashboard" screen. */
     public static List<Integer> getDashboardPids(Context context) {
         String stored = prefs(context).getString(KEY_DASHBOARD_PIDS, null);
         if (stored == null) {
             List<Integer> defaults = new ArrayList<>();
             defaults.add(PidCatalog.RPM);
             defaults.add(PidCatalog.SPEED);
-            defaults.add(PidCatalog.COOLANT);
+            defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MILES);
             return defaults;
         }
-        return parseIds(stored);
+        List<Integer> ids = parseIds(stored);
+        int coolant = ids.indexOf(REMOVED_COOLANT_PID);
+        if (coolant >= 0) {
+            if (ids.contains(PidCatalog.ENGINE_OIL_TEMP)) {
+                ids.remove(coolant);
+            } else {
+                ids.set(coolant, PidCatalog.ENGINE_OIL_TEMP);
+            }
+        }
+        return ids;
     }
 
     public static void setDashboardPids(Context context, List<Integer> pids) {
         prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids)).apply();
     }
 
-    /** PIDs the truck said it answers on the last successful scan; empty if never scanned. */
     public static Set<Integer> getSupportedPids(Context context) {
-        String stored = prefs(context).getString(KEY_SUPPORTED_PIDS, "");
-        return new HashSet<>(parseIds(stored));
+        return new HashSet<>(parseIds(prefs(context).getString(KEY_SUPPORTED_PIDS, "")));
     }
 
     public static void setSupportedPids(Context context, Set<Integer> pids) {
@@ -100,10 +92,8 @@ public final class AppSettings {
         List<Integer> ids = new ArrayList<>();
         if (stored == null || stored.isEmpty()) return ids;
         for (String part : stored.split(",")) {
-            try {
-                ids.add(Integer.parseInt(part.trim()));
-            } catch (NumberFormatException ignored) {
-            }
+            try { ids.add(Integer.parseInt(part.trim())); }
+            catch (NumberFormatException ignored) { }
         }
         return ids;
     }

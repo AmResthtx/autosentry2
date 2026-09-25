@@ -17,7 +17,6 @@ import java.util.Map;
 public final class PidCatalog {
     public static final int RPM = 0x0C;
     public static final int SPEED = 0x0D;
-    public static final int COOLANT = 0x05;
     public static final int MAF = 0x10;
     public static final int FUEL_RATE = 0x5E;
     /** Standard Mode 01 id; on the 7.3L the value comes from Ford's enhanced PID instead. */
@@ -88,7 +87,6 @@ public final class PidCatalog {
     static {
         std(0x0C, "Engine RPM", "rpm", 2, "%.0f", b -> word(b) / 4.0);
         std(0x0D, "Vehicle Speed", "mph", 1, "%.0f", b -> b[0] * 0.621371);
-        std(0x05, "Coolant Temp", "°F", 1, "%.0f", b -> cToF(b[0] - 40));
         std(0x04, "Engine Load", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0);
         std(0x11, "Throttle Position", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0);
         std(0x49, "Accelerator Pedal", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0);

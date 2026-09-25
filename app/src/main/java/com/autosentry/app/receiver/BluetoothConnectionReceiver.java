@@ -6,6 +6,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
+import androidx.core.content.ContextCompat;
+
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
@@ -46,7 +48,7 @@ public class BluetoothConnectionReceiver extends BroadcastReceiver {
         if (action.equals(BluetoothDevice.ACTION_ACL_CONNECTED)) {
             Log.i(TAG, "OBD adapter connected, auto-starting tracking");
             try {
-                context.startForegroundService(new Intent(context, TrackingService.class));
+                ContextCompat.startForegroundService(context, new Intent(context, TrackingService.class));
             } catch (RuntimeException e) {
                 // Android 12+ blocks this while the app is in the background unless the
                 // app is exempt from battery optimization. Log it so it isn't a silent failure.

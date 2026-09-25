@@ -13,15 +13,20 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
+import com.autosentry.app.BuildConfig;
 import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.MaintenanceEvent;
@@ -60,6 +65,8 @@ public class MainActivity extends AppCompatActivity {
     private long lastDbRefresh = 0;
     private volatile VehicleProfile lastProfile;
     private boolean dashboardTabVisible = true;
+    // Runs once the Bluetooth permission dialog is answered with a grant.
+    private Runnable afterPermissions;
 
     private final Map<Integer, TextView> tileValues = new HashMap<>();
     private GridLayout gridTiles;
@@ -67,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
     private Button buttonTabDashboard, buttonTabService, buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog;
+            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,9 +103,13 @@ public class MainActivity extends AppCompatActivity {
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
         buttonBackgroundAccess = findViewById(R.id.buttonBackgroundAccess);
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
+        buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
+        }
 
-        if (!PermissionFlow.hasAllPermissions(this)) {
-            PermissionFlow.requestAllPermissions(this);
+        if (savedInstanceState == null) {
+            PermissionFlow.requestMissingPermissions(this);
         }
 
         buttonTabDashboard.setOnClickListener(v -> showTab(true));
@@ -112,6 +123,7 @@ public class MainActivity extends AppCompatActivity {
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());
         buttonBackgroundAccess.setOnClickListener(v -> requestBackgroundAccess());
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
+        buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
 
         rebuildTiles();
         showTab(true);
@@ -129,7 +141,26 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        Runnable action = afterPermissions;
+        afterPermissions = null;
+        if (action != null) {
+            if (PermissionFlow.hasRequiredPermissions(this)) {
+                action.run();
+            } else {
+                PermissionFlow.explainBluetoothDenied(this);
+            }
+            return;
+        }
         maybeAutoStartTracking();
+    }
+
+    private void withRequiredPermissions(Runnable action) {
+        if (PermissionFlow.hasRequiredPermissions(this)) {
+            action.run();
+            return;
+        }
+        afterPermissions = action;
+        PermissionFlow.requestMissingPermissions(this);
     }
 
     /**
@@ -140,13 +171,13 @@ public class MainActivity extends AppCompatActivity {
     private void maybeAutoStartTracking() {
         if (TrackingService.isRunning) return;
         if (!AppSettings.hasObdAdapterConfigured(this) || !AppSettings.isAutoTrackingEnabled(this)) return;
-        if (!PermissionFlow.hasAllPermissions(this)) return;
+        if (!PermissionFlow.hasRequiredPermissions(this)) return;
         startTrackingService();
     }
 
     private void startTrackingService() {
         try {
-            startForegroundService(new Intent(this, TrackingService.class));
+            ContextCompat.startForegroundService(this, new Intent(this, TrackingService.class));
         } catch (RuntimeException e) {
             Toast.makeText(this, "Couldn't start tracking: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
@@ -161,17 +192,18 @@ public class MainActivity extends AppCompatActivity {
         lastDbRefresh = 0; // refresh the service tab right away
     }
 
-    /** Start/stop by hand. Without a paired adapter this runs the simulator, for testing. */
+    /** Start/stop by hand. Without a paired adapter this opens pairing instead. */
     private void toggleTracking() {
         if (TrackingService.isRunning) {
             stopService(new Intent(this, TrackingService.class));
             return;
         }
-        if (!PermissionFlow.hasAllPermissions(this)) {
-            PermissionFlow.requestAllPermissions(this);
+        if (!AppSettings.hasObdAdapterConfigured(this)) {
+            Toast.makeText(this, "Pair your OBD adapter first", Toast.LENGTH_SHORT).show();
+            pickObdAdapter();
             return;
         }
-        startTrackingService();
+        withRequiredPermissions(this::startTrackingService);
     }
 
     /**
@@ -181,8 +213,8 @@ public class MainActivity extends AppCompatActivity {
      * takes it from here automatically.
      */
     private void pickObdAdapter() {
-        if (!PermissionFlow.hasAllPermissions(this)) {
-            PermissionFlow.requestAllPermissions(this);
+        if (!PermissionFlow.hasRequiredPermissions(this)) {
+            withRequiredPermissions(this::pickObdAdapter);
             return;
         }
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
@@ -193,6 +225,10 @@ public class MainActivity extends AppCompatActivity {
 
         Set<BluetoothDevice> bonded;
         try {
+            if (!adapter.isEnabled()) {
+                Toast.makeText(this, "Turn on Bluetooth, then pair your OBD adapter in phone Settings > Bluetooth", Toast.LENGTH_LONG).show();
+                return;
+            }
             bonded = adapter.getBondedDevices();
         } catch (SecurityException e) {
             Toast.makeText(this, "Bluetooth permission required", Toast.LENGTH_LONG).show();
@@ -230,7 +266,7 @@ public class MainActivity extends AppCompatActivity {
                     AppSettings.setAutoTrackingEnabled(this, true);
                     Toast.makeText(this, "Paired: " + name + ". Tracking will now start automatically when it connects.", Toast.LENGTH_LONG).show();
                     refreshAdapterStatusUi();
-                    // Restart so a running simulator session switches over to the real adapter.
+                    // Restart so a running session switches over to the newly chosen adapter.
                     if (TrackingService.isRunning) stopService(new Intent(this, TrackingService.class));
                     uiHandler.postDelayed(this::maybeAutoStartTracking, 800L);
                 })
@@ -281,20 +317,57 @@ public class MainActivity extends AppCompatActivity {
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             if (profile == null) return;
-            profile.oilLifePercent = 100.0;
-            profile.milesSinceOilChange = 0;
-            profile.engineHoursSinceOilChange = 0;
-            profile.lastOilResetTimestamp = System.currentTimeMillis();
-            db.vehicleProfileDao().update(profile);
+            long now = System.currentTimeMillis();
+            db.vehicleProfileDao().resetOil(100.0, 0, now);
 
             MaintenanceEvent event = new MaintenanceEvent();
             event.type = ServiceItemType.OIL_FILTER.name();
             event.notes = "Logged from dashboard";
-            event.timestamp = System.currentTimeMillis();
+            event.timestamp = now;
             event.odometerAtEvent = profile.odometerMiles;
             db.maintenanceDao().insert(event);
             lastDbRefresh = 0;
+            uiHandler.post(() -> Toast.makeText(this, String.format(Locale.US,
+                    "Oil change logged at %,.0f mi", profile.odometerMiles), Toast.LENGTH_SHORT).show());
         });
+    }
+
+    /** Tracking adds driven miles; this sets the starting point to what the instrument cluster reads. */
+    private void promptSetOdometer() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        VehicleProfile profile = lastProfile;
+        if (profile != null && profile.odometerMiles > 0) {
+            input.setText(String.format(Locale.US, "%.0f", profile.odometerMiles));
+        }
+        FrameLayout container = new FrameLayout(this);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        container.setPadding(pad, 0, pad, 0);
+        container.addView(input);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Current odometer (mi)")
+                .setMessage("Enter the instrument-cluster reading. Tracked driving is added automatically.")
+                .setView(container)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    double miles;
+                    try {
+                        miles = Double.parseDouble(input.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        miles = -1;
+                    }
+                    if (!(miles >= 0) || Double.isInfinite(miles)) {
+                        Toast.makeText(this, "Enter the odometer as a number of miles", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    final double value = miles;
+                    ioExecutor.execute(() -> {
+                        db.vehicleProfileDao().setOdometer(value);
+                        lastDbRefresh = 0;
+                    });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     @Override
@@ -323,9 +396,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateLiveStatus() {
         boolean running = TrackingService.isRunning;
-        buttonToggleTracking.setText(running ? "Stop Tracking"
-                : (AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking" : "Start Tracking (simulator)"));
-        textLiveStatus.setText(running ? LiveReadings.status : "Tracking is off — tap Start Tracking");
+        String startLabel = AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking" : "Start Tracking (pair adapter first)";
+        buttonToggleTracking.setText(running ? "Stop Tracking" : startLabel);
+        textLiveStatus.setText(LiveReadings.status);
     }
 
     private void updateTiles() {
@@ -465,6 +538,10 @@ public class MainActivity extends AppCompatActivity {
             if (needServiceList) {
                 List<ServiceStatus> statuses = MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao());
                 for (ServiceStatus status : statuses) {
+                    if (!status.hasRecord) {
+                        sb.append(status.displayName).append("\n    No service logged yet — log the last one to track it\n");
+                        continue;
+                    }
                     String flag = status.overdue ? "  — OVERDUE" : (status.dueSoon ? "  — DUE SOON" : "");
                     sb.append(String.format(Locale.US, "%s\n    %.0f%% used, %,.0f mi remaining%s\n",
                             status.displayName, status.percentOfLifeUsed, status.milesRemaining(), flag));
@@ -473,7 +550,9 @@ public class MainActivity extends AppCompatActivity {
 
             uiHandler.post(() -> {
                 textOilLife.setText(String.format(Locale.US, "Oil life: %.0f%%", profile.oilLifePercent));
-                textOdometer.setText(String.format(Locale.US, "Odometer: %,.1f mi", profile.odometerMiles));
+                textOdometer.setText(profile.odometerMiles > 0
+                        ? String.format(Locale.US, "Odometer: %,.1f mi", profile.odometerMiles)
+                        : "Odometer: not set — tap Set Odometer");
                 textOilDetail.setText(String.format(Locale.US,
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));

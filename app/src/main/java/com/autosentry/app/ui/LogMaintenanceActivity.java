@@ -13,7 +13,6 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -25,6 +24,7 @@ import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.MaintenanceAttachment;
 import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.VehicleProfile;
+import com.autosentry.app.engine.OilLifeEngine;
 import com.autosentry.app.maintenance.PhotoStorage;
 import com.autosentry.app.maintenance.ServiceItemType;
 
@@ -32,6 +32,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -50,8 +51,7 @@ public class LogMaintenanceActivity extends AppCompatActivity {
 
     private AppDatabase db;
     private Spinner spinnerType;
-    private EditText editTitle, editNotes;
-    private TextView textOdometer;
+    private EditText editTitle, editNotes, editOdometer;
     private LinearLayout layoutPhotoThumbnails;
     private double currentOdometer = 0;
 
@@ -95,7 +95,7 @@ public class LogMaintenanceActivity extends AppCompatActivity {
         spinnerType = findViewById(R.id.spinnerType);
         editTitle = findViewById(R.id.editTitle);
         editNotes = findViewById(R.id.editNotes);
-        textOdometer = findViewById(R.id.textOdometer);
+        editOdometer = findViewById(R.id.editOdometer);
         layoutPhotoThumbnails = findViewById(R.id.layoutPhotoThumbnails);
         Button buttonTakePhoto = findViewById(R.id.buttonTakePhoto);
         Button buttonPickPhoto = findViewById(R.id.buttonPickPhoto);
@@ -114,7 +114,11 @@ public class LogMaintenanceActivity extends AppCompatActivity {
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             currentOdometer = profile != null ? profile.odometerMiles : 0;
-            runOnUiThread(() -> textOdometer.setText(String.format("Odometer: %.1f mi", currentOdometer)));
+            runOnUiThread(() -> {
+                if (editOdometer.getText().length() == 0) {
+                    editOdometer.setText(String.format(Locale.US, "%.1f", currentOdometer));
+                }
+            });
         });
     }
 
@@ -194,6 +198,18 @@ public class LogMaintenanceActivity extends AppCompatActivity {
             }
         }
 
+        double odometer;
+        try {
+            odometer = Double.parseDouble(editOdometer.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            odometer = -1;
+        }
+        if (!(odometer >= 0) || Double.isInfinite(odometer)) {
+            editOdometer.setError("Enter the odometer reading in miles");
+            return;
+        }
+        final double eventOdometer = odometer;
+
         List<File> photosToSave = new ArrayList<>(pendingPhotos);
         ioExecutor.execute(() -> {
             MaintenanceEvent event = new MaintenanceEvent();
@@ -201,8 +217,21 @@ public class LogMaintenanceActivity extends AppCompatActivity {
             event.title = title.isEmpty() ? null : title;
             event.notes = notes.isEmpty() ? null : notes;
             event.timestamp = System.currentTimeMillis();
-            event.odometerAtEvent = currentOdometer;
+            event.odometerAtEvent = eventOdometer;
             long eventId = db.maintenanceDao().insert(event);
+
+            VehicleProfile profile = db.vehicleProfileDao().getSync();
+            if (profile != null && eventOdometer > profile.odometerMiles) {
+                db.vehicleProfileDao().setOdometer(eventOdometer); // the service can't be ahead of the truck
+                profile.odometerMiles = eventOdometer;
+            }
+            // Oil life follows the newest oil change; back-logging an older one leaves it alone.
+            MaintenanceEvent latestOil = db.maintenanceDao().getMostRecentOfType(ServiceItemType.OIL_FILTER.name());
+            if (profile != null && latestOil != null && latestOil.id == eventId) {
+                double milesSince = Math.max(0, profile.odometerMiles - eventOdometer);
+                db.vehicleProfileDao().resetOil(
+                        OilLifeEngine.degrade(100.0, milesSince, profile.severeDuty, 0, 0), milesSince, event.timestamp);
+            }
 
             for (File photo : photosToSave) {
                 MaintenanceAttachment attachment = new MaintenanceAttachment();

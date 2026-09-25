@@ -1,7 +1,11 @@
 package com.autosentry.app.service;
 
+import android.Manifest;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -9,6 +13,8 @@ import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.ServiceCompat;
+import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.Session;
@@ -23,7 +29,6 @@ import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.notifications.NotificationUtils;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
-import com.autosentry.app.obd.OBDSimulator;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
@@ -48,8 +53,8 @@ import java.util.concurrent.RejectedExecutionException;
  *   3. saves a TripPoint about once a second
  *
  * Distance comes from the truck's own speed reading when it reports one, and
- * from GPS otherwise. Uses OBDSimulator only when no adapter has been paired
- * at all — a real adapter that fails to connect is retried, never faked.
+ * from GPS otherwise. Requires a paired adapter; one that fails to connect is
+ * retried, never faked.
  */
 public class TrackingService extends Service {
     private static final String TAG = "TrackingService";
@@ -74,8 +79,6 @@ public class TrackingService extends Service {
     private AppDatabase db;
     private GpsTracker gpsTracker;
     private ELM327Adapter realAdapter;
-    private OBDSimulator simulator;
-    private boolean useRealAdapter;
     private boolean started = false;
     private volatile boolean stopped = false;
 
@@ -97,6 +100,10 @@ public class TrackingService extends Service {
     private int connectFailures = 0;
     private double distanceSincePoint = 0;
     private double lastInstantMpg = 0;
+    // Driving not yet written to the profile row; flushed as deltas once a second.
+    private double pendingMiles, pendingHours, pendingGallons, pendingOilPercent;
+    // Shown on the dashboard after the service stops, instead of the plain "off" status.
+    private volatile String stopReason;
 
     private final Runnable pollTask = this::pollTick;
 
@@ -105,7 +112,6 @@ public class TrackingService extends Service {
         super.onCreate();
         db = AppDatabase.getInstance(this);
         gpsTracker = new GpsTracker(this);
-        simulator = new OBDSimulator();
         NotificationUtils.ensureChannels(this);
 
         // Without this, the tablet suspends its CPU when the screen turns off and the
@@ -125,24 +131,54 @@ public class TrackingService extends Service {
         // The adapter comes from saved settings, not the intent, so a system
         // restart (which delivers a null intent) still talks to the real adapter.
         String adapterAddress = AppSettings.getObdAdapterAddress(this);
-        useRealAdapter = adapterAddress != null && !adapterAddress.isEmpty();
-        if (useRealAdapter) {
-            realAdapter = new ELM327Adapter(adapterAddress);
-        }
 
         try {
-            startForeground(NotificationUtils.TRACKING_NOTIFICATION_ID, buildNotification("Starting..."));
+            startInForeground();
         } catch (RuntimeException e) {
-            // Android refused to let a background app start a foreground service.
+            // Android refused the foreground service (missing permission or background start).
             AppLog.e(this, TAG, "Could not start foreground service", e);
+            stopReason = "Couldn't start tracking: " + e.getMessage();
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (adapterAddress == null || adapterAddress.isEmpty()) {
+            stopReason = "No OBD adapter paired — tap Pair OBD Adapter";
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        realAdapter = new ELM327Adapter(adapterAddress);
         isRunning = true;
-        LiveReadings.status = useRealAdapter ? "Connecting to OBD adapter…" : "Simulator (no adapter paired)";
+        LiveReadings.status = "Connecting to OBD adapter…";
 
         ioExecutor.execute(this::initState);
         return START_STICKY;
+    }
+
+    /**
+     * Android 14+ checks each declared foreground type: location needs a location
+     * grant and is refused when started from the background (the Bluetooth
+     * receiver), connectedDevice needs BLUETOOTH_CONNECT. Ask only for what is
+     * granted, and fall back to OBD-only tracking when location is refused.
+     */
+    private void startInForeground() {
+        int connected = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
+        int location = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+        boolean btGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+        int types = (btGranted ? connected : 0) | (gpsTracker.hasPermission() ? location : 0);
+        if (types == 0) types = connected; // fails below with Android's own permission message
+        android.app.Notification notification = buildNotification("Starting...");
+        try {
+            ServiceCompat.startForeground(this, NotificationUtils.TRACKING_NOTIFICATION_ID, notification, types);
+        } catch (RuntimeException e) {
+            if (types == (connected | location)) {
+                AppLog.i(this, TAG, "Location foreground refused, tracking without GPS: " + e.getMessage());
+                ServiceCompat.startForeground(this, NotificationUtils.TRACKING_NOTIFICATION_ID, notification, connected);
+            } else {
+                throw e;
+            }
+        }
     }
 
     private void initState() {
@@ -205,7 +241,6 @@ public class TrackingService extends Service {
     }
 
     private boolean ensureConnected() {
-        if (!useRealAdapter) return true;
         if (realAdapter.isConnected()) return true;
 
         LiveReadings.clearValues();
@@ -227,6 +262,7 @@ public class TrackingService extends Service {
             updateNotification("Waiting for OBD adapter…");
             if (System.currentTimeMillis() - lastConnectedTimestamp > GIVE_UP_WITHOUT_ADAPTER_MS) {
                 AppLog.i(this, TAG, "No adapter for a long time, stopping. Reopen the app or reconnect to restart.");
+                stopReason = "Stopped: OBD adapter unreachable for 10 minutes";
                 stopSelf();
             }
             return false;
@@ -235,7 +271,6 @@ public class TrackingService extends Service {
 
     /** Adapter is linked, but the truck's computer may not be awake yet (key off). */
     private boolean ensureTruckAnswering() throws IOException {
-        if (!useRealAdapter) return true;
         if (!supportedPids.isEmpty()) return true;
 
         Set<Integer> found = realAdapter.readSupportedPids();
@@ -270,7 +305,6 @@ public class TrackingService extends Service {
         Set<Integer> want = new LinkedHashSet<>(AppSettings.getDashboardPids(this));
         want.add(PidCatalog.RPM);
         want.add(PidCatalog.SPEED);
-        want.add(PidCatalog.COOLANT);
         want.add(PidCatalog.MAF);
         want.add(PidCatalog.FUEL_RATE);
         want.add(PidCatalog.ENGINE_OIL_TEMP);
@@ -278,8 +312,8 @@ public class TrackingService extends Service {
         for (int id : want) {
             PidCatalog.Pid def = PidCatalog.get(id);
             if (def == null || def.computed) continue;
-            if (useRealAdapter && !supportedPids.contains(id)) continue;
-            int[] data = useRealAdapter ? realAdapter.readPid(id) : simulator.readPid(id);
+            if (!supportedPids.contains(id)) continue;
+            int[] data = realAdapter.readPid(id);
             double value = def.decode(data);
             if (Double.isNaN(value)) {
                 LiveReadings.values.remove(id);
@@ -287,7 +321,7 @@ public class TrackingService extends Service {
                 LiveReadings.values.put(id, value);
             }
         }
-        if (useRealAdapter && fordOilTemp) {
+        if (fordOilTemp) {
             double oilC = realAdapter.readFordEngineOilTempC();
             if (Double.isNaN(oilC)) {
                 LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
@@ -298,7 +332,7 @@ public class TrackingService extends Service {
 
         long now = System.currentTimeMillis();
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
-        boolean engineRunning = useRealAdapter ? (rpm != null && rpm > 0) : true;
+        boolean engineRunning = rpm != null && rpm > 0;
 
         if (!engineRunning) {
             LiveReadings.engineRunning = false;
@@ -313,7 +347,7 @@ public class TrackingService extends Service {
         }
         engineOffSince = 0;
         LiveReadings.engineRunning = true;
-        if (useRealAdapter) LiveReadings.status = "Engine running";
+        LiveReadings.status = "Engine running";
 
         double dtSeconds = (now - lastTickTimestamp) / 1000.0;
         lastTickTimestamp = now;
@@ -334,19 +368,16 @@ public class TrackingService extends Service {
         double gallonsDelta = gallonsPerHour * (dtSeconds / 3600.0);
         lastInstantMpg = (gallonsPerHour > 0.01 && speedMph > 0.5) ? speedMph / gallonsPerHour : 0;
 
-        // Oil life runs on engine oil temp (the 7.3L's real thermal signal); coolant only as fallback.
+        // Oil life runs on engine oil temp, the 7.3L's real thermal signal; no reading adds no heat penalty.
         Double oilTempF = LiveReadings.values.get(PidCatalog.ENGINE_OIL_TEMP);
-        Double engineTempF = oilTempF != null ? oilTempF : LiveReadings.values.get(PidCatalog.COOLANT);
 
         if (activeSession == null) startSession(now);
 
-        profile.odometerMiles += distanceDeltaMiles;
-        profile.milesSinceOilChange += distanceDeltaMiles;
-        profile.engineHoursSinceOilChange += engineHoursDelta;
-        profile.totalFuelGallons += gallonsDelta;
-        profile.oilLifePercent = OilLifeEngine.degrade(
-                profile.oilLifePercent, distanceDeltaMiles, profile.severeDuty,
-                rpm != null ? rpm : 0, engineTempF != null ? engineTempF : 0);
+        pendingMiles += distanceDeltaMiles;
+        pendingHours += engineHoursDelta;
+        pendingGallons += gallonsDelta;
+        pendingOilPercent += OilLifeEngine.percentUsed(distanceDeltaMiles, profile.severeDuty,
+                rpm != null ? rpm : 0, oilTempF != null ? oilTempF : 0);
 
         activeSession.distanceMiles += distanceDeltaMiles;
         activeSession.fuelGallonsUsed += gallonsDelta;
@@ -368,7 +399,7 @@ public class TrackingService extends Service {
             LiveReadings.values.remove(PidCatalog.COMPUTED_TRIP_MPG);
         }
         LiveReadings.values.put(PidCatalog.COMPUTED_TRIP_MILES, activeSession.distanceMiles);
-        LiveReadings.values.put(PidCatalog.COMPUTED_ODOMETER, profile.odometerMiles);
+        LiveReadings.values.put(PidCatalog.COMPUTED_ODOMETER, profile.odometerMiles + pendingMiles);
 
         if (now - lastPersistTimestamp >= PERSIST_INTERVAL_MS) {
             lastPersistTimestamp = now;
@@ -376,8 +407,18 @@ public class TrackingService extends Service {
         }
     }
 
+    /** Writes pending driving as deltas, then reloads the row to pick up UI edits (odometer, oil change). */
+    private void flushProfile() {
+        if (pendingMiles > 0 || pendingHours > 0 || pendingGallons > 0 || pendingOilPercent > 0) {
+            db.vehicleProfileDao().applyDrive(pendingMiles, pendingHours, pendingGallons, pendingOilPercent);
+            pendingMiles = pendingHours = pendingGallons = pendingOilPercent = 0;
+        }
+        VehicleProfile fresh = db.vehicleProfileDao().getSync();
+        if (fresh != null) profile = fresh;
+    }
+
     private void persist(long now, double speedMph, double rpm, double maf) {
-        db.vehicleProfileDao().update(profile);
+        flushProfile();
         db.sessionDao().update(activeSession);
 
         TripPoint point = new TripPoint();
@@ -403,7 +444,7 @@ public class TrackingService extends Service {
     private void startSession(long now) {
         activeSession = new Session();
         activeSession.startTimestamp = now;
-        activeSession.startOdometerMiles = profile.odometerMiles;
+        activeSession.startOdometerMiles = profile.odometerMiles + pendingMiles;
         activeSession.id = db.sessionDao().insert(activeSession);
         distanceSincePoint = 0;
     }
@@ -411,7 +452,7 @@ public class TrackingService extends Service {
     private void endSession(long now) {
         activeSession.endTimestamp = now;
         db.sessionDao().update(activeSession);
-        db.vehicleProfileDao().update(profile);
+        flushProfile();
         activeSession = null;
     }
 
@@ -479,7 +520,8 @@ public class TrackingService extends Service {
         gpsTracker.stop();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         LiveReadings.clearValues();
-        LiveReadings.status = "Tracking is off";
+        LiveReadings.supported = Collections.emptySet();
+        LiveReadings.status = stopReason != null ? stopReason : LiveReadings.IDLE_STATUS;
         try {
             ioExecutor.execute(() -> {
                 if (realAdapter != null) realAdapter.disconnect();
@@ -487,7 +529,7 @@ public class TrackingService extends Service {
                     activeSession.endTimestamp = System.currentTimeMillis();
                     db.sessionDao().update(activeSession);
                 }
-                if (profile != null) db.vehicleProfileDao().update(profile);
+                if (profile != null) flushProfile();
             });
         } catch (RejectedExecutionException ignored) {
         }

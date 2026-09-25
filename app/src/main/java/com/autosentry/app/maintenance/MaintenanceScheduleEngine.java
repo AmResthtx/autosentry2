@@ -28,7 +28,7 @@ public final class MaintenanceScheduleEngine {
         int intervalMiles = interval.miles(profile.severeDuty);
         double percent = intervalMiles > 0 ? (milesSince / intervalMiles) * 100.0 : 0;
 
-        return new ServiceStatus(type, interval.displayName, milesSince, intervalMiles, percent);
+        return new ServiceStatus(type, interval.displayName, milesSince, intervalMiles, percent, lastEvent != null);
     }
 
     public static List<ServiceStatus> computeAll(VehicleProfile profile, MaintenanceDao dao) {

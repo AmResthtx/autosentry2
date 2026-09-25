@@ -12,7 +12,9 @@ android {
         applicationId = "com.autosentry.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        // GitHub Actions run number: every CI APK has its own build number (shown in the
+        // title bar) and installs over the previous one. Local builds are build 1.
+        versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 1
         versionName = "0.1.0"
     }
 
@@ -38,6 +40,7 @@ android {
     }
     buildFeatures {
         viewBinding = false
+        buildConfig = true
     }
 }
 

@@ -51,12 +51,18 @@
             android:minLines="3" />
 
         <TextView
-            android:id="@+id/textOdometer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Odometer: -- mi"
-            android:textColor="#757575" />
+            android:text="Odometer at service (mi)"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editOdometer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:inputType="numberDecimal" />
 
         <TextView
             android:layout_width="match_parent"

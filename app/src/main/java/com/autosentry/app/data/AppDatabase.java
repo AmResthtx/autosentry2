@@ -1,6 +1,7 @@
 package com.autosentry.app.data;
 
 import android.content.Context;
+import android.database.Cursor;
 
 import androidx.annotation.NonNull;
 import androidx.room.Database;
@@ -39,6 +40,10 @@ public abstract class AppDatabase extends RoomDatabase {
     static final Migration MIGRATION_1_2 = new Migration(1, 2) {
         @Override
         public void migrate(@NonNull SupportSQLiteDatabase db) {
+            // severeDuty was added to version 1 without a version bump; early v1 databases lack it.
+            if (!hasColumn(db, "vehicle_profile", "severeDuty")) {
+                db.execSQL("ALTER TABLE vehicle_profile ADD COLUMN severeDuty INTEGER NOT NULL DEFAULT 1");
+            }
             db.execSQL("ALTER TABLE maintenance_events ADD COLUMN title TEXT");
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS maintenance_attachments (" +
@@ -50,6 +55,16 @@ public abstract class AppDatabase extends RoomDatabase {
             );
         }
     };
+
+    private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
+        try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {
+            int nameIndex = cursor.getColumnIndex("name");
+            while (cursor.moveToNext()) {
+                if (column.equals(cursor.getString(nameIndex))) return true;
+            }
+        }
+        return false;
+    }
 
     private static volatile AppDatabase INSTANCE;
 

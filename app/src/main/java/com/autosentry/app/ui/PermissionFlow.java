@@ -1,7 +1,8 @@
 package com.autosentry.app.ui;
 
 import android.Manifest;
-import android.bluetooth.BluetoothAdapter;
+import android.app.Activity;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.widget.Toast;
@@ -12,12 +13,25 @@ import androidx.core.content.ContextCompat;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Only Bluetooth is required (to talk to the adapter). Location (GPS speed
+ * fallback) and notifications (service alerts) are requested but optional,
+ * so denying them never blocks tracking.
+ */
 public final class PermissionFlow {
     private static final int PERMISSION_REQ = 1001;
 
     private PermissionFlow() {}
 
-    private static String[] requiredPerms() {
+    private static List<String> requiredPerms() {
+        List<String> perms = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT);
+        }
+        return perms;
+    }
+
+    private static List<String> optionalPerms() {
         List<String> perms = new ArrayList<>();
         perms.add(Manifest.permission.ACCESS_FINE_LOCATION);
         perms.add(Manifest.permission.ACCESS_COARSE_LOCATION);
@@ -25,43 +39,38 @@ public final class PermissionFlow {
             perms.add(Manifest.permission.POST_NOTIFICATIONS);
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            perms.add(Manifest.permission.BLUETOOTH_CONNECT);
             perms.add(Manifest.permission.BLUETOOTH_SCAN);
-        } else {
-            perms.add(Manifest.permission.BLUETOOTH);
-            perms.add(Manifest.permission.BLUETOOTH_ADMIN);
         }
-        return perms.toArray(new String[0]);
+        return perms;
     }
 
-    public static boolean hasAllPermissions(MainActivity activity) {
+    private static boolean granted(Context context, String perm) {
+        return ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static boolean hasRequiredPermissions(Context context) {
         for (String perm : requiredPerms()) {
-            if (ContextCompat.checkSelfPermission(activity, perm) != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
+            if (!granted(context, perm)) return false;
         }
         return true;
     }
 
-    public static void requestAllPermissions(MainActivity activity) {
+    /** Asks for every missing permission, required and optional. */
+    public static void requestMissingPermissions(Activity activity) {
         List<String> missing = new ArrayList<>();
-        for (String perm : requiredPerms()) {
-            if (ContextCompat.checkSelfPermission(activity, perm) != PackageManager.PERMISSION_GRANTED) {
-                missing.add(perm);
-            }
+        List<String> all = requiredPerms();
+        all.addAll(optionalPerms());
+        for (String perm : all) {
+            if (!granted(activity, perm)) missing.add(perm);
         }
         if (!missing.isEmpty()) {
             ActivityCompat.requestPermissions(activity, missing.toArray(new String[0]), PERMISSION_REQ);
-            return;
         }
+    }
 
-        try {
-            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-            if (adapter == null || !adapter.isEnabled()) {
-                Toast.makeText(activity, "Enable Bluetooth and pair your OBD adapter in Settings", Toast.LENGTH_LONG).show();
-            }
-        } catch (SecurityException ignored) {
-            // The caller will receive the normal permission/connection error when pairing.
-        }
+    /** Android stops showing the dialog after repeated denials, so say where to fix it. */
+    public static void explainBluetoothDenied(Activity activity) {
+        Toast.makeText(activity, "Bluetooth (Nearby devices) permission is required to talk to the OBD adapter. "
+                + "Allow it in Settings > Apps > AutoSentry > Permissions.", Toast.LENGTH_LONG).show();
     }
 }

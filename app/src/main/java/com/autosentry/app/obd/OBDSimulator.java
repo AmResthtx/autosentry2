@@ -1,69 +1,68 @@
 package com.autosentry.app.obd;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Random;
+import java.util.Set;
 
 /**
- * Simulates OBD-II adapter responses for development and testing.
- * In production, this class is replaced by real Bluetooth ELM327/OBDLink communication.
+ * Bench-test stand-in for the adapter, used only by debug builds with no
+ * adapter paired (release builds never simulate). Answers a fixed PID set
+ * with raw Mode 01 bytes so the real decoders run, and follows a repeating
+ * drive cycle — 30 s idle, then 150 s at ~55 mph — so trips, odometer,
+ * MPG and oil life all visibly move while testing.
  */
 public class OBDSimulator {
+    public static final Set<Integer> SUPPORTED;
+    static {
+        Set<Integer> ids = new LinkedHashSet<>();
+        ids.add(PidCatalog.RPM);
+        ids.add(PidCatalog.SPEED);
+        ids.add(PidCatalog.COOLANT);
+        ids.add(PidCatalog.MAF);
+        ids.add(PidCatalog.ENGINE_OIL_TEMP);
+        ids.add(0x42); // module voltage
+        SUPPORTED = Collections.unmodifiableSet(ids);
+    }
+
+    private static final long CYCLE_MS = 180_000L;
+    private static final long IDLE_MS = 30_000L;
+
     private final Random random = new Random();
-    private int baseRPM = 750; // idle RPM
-    private int oscillationCounter = 0;
+    private final long startMs = System.currentTimeMillis();
 
-    /**
-     * Simulates reading RPM from an OBD-II adapter.
-     * Occasionally introduces instability for testing the detection algorithm.
-     */
-    public int readRPM() {
-        oscillationCounter++;
-        int noise = random.nextInt(40) - 20; // +/- 20 RPM normal noise
-
-        // Every 10th reading, simulate a large RPM swing (instability)
-        if (oscillationCounter % 10 == 0) {
-            int spike = (random.nextBoolean() ? 1 : -1) * (200 + random.nextInt(150));
-            return baseRPM + spike + noise;
-        }
-        return baseRPM + noise;
+    private boolean cruising() {
+        return (System.currentTimeMillis() - startMs) % CYCLE_MS >= IDLE_MS;
     }
 
-    /**
-     * Simulates reading coolant temperature (degrees C).
-     */
-    public int readCoolantTemp() {
-        return 85 + random.nextInt(15); // 85-100 C normal operating range
+    private int jitter(int base, int spread) {
+        return base + random.nextInt(spread * 2 + 1) - spread;
     }
 
-    /**
-     * Raw Mode 01 data bytes for a PID, shaped like the real adapter's
-     * answer so the same decoders run against simulated data.
-     */
+    /** Raw data bytes for a PID, or null (no answer) for anything outside SUPPORTED. */
     public int[] readPid(int pid) {
+        boolean cruising = cruising();
         switch (pid) {
-            case 0x0C: { int raw = readRPM() * 4; return new int[]{raw >> 8, raw & 0xFF}; }
-            case 0x05: return new int[]{readCoolantTemp() + 40};
-            case 0x10: { int raw = Math.round(readMAF() * 100); return new int[]{raw >> 8, raw & 0xFF}; }
-            case 0x0D: return new int[]{0};
-            case 0x42: { int mv = readBatteryVoltage(); return new int[]{mv >> 8, mv & 0xFF}; }
-            default: return new int[]{100 + random.nextInt(20), random.nextInt(256)};
+            case PidCatalog.RPM: {
+                int raw = jitter(cruising ? 1700 : 700, cruising ? 50 : 20) * 4;
+                return new int[]{raw >> 8, raw & 0xFF};
+            }
+            case PidCatalog.SPEED:
+                return new int[]{cruising ? jitter(89, 3) : 0}; // km/h
+            case PidCatalog.COOLANT:
+                return new int[]{jitter(88, 2) + 40};
+            case PidCatalog.ENGINE_OIL_TEMP:
+                return new int[]{jitter(95, 2) + 40};
+            case PidCatalog.MAF: {
+                int raw = jitter(cruising ? 4500 : 800, cruising ? 300 : 50); // g/s x100
+                return new int[]{raw >> 8, raw & 0xFF};
+            }
+            case 0x42: {
+                int mv = jitter(14100, 100);
+                return new int[]{mv >> 8, mv & 0xFF};
+            }
+            default:
+                return null;
         }
-    }
-
-    /**
-     * Simulates reading battery voltage (millivolts).
-     */
-    public int readBatteryVoltage() {
-        return 13500 + random.nextInt(1500); // 13.5-15.0V
-    }
-
-    /**
-     * Simulates Mass Air Flow (grams/sec). Roughly scales with RPM above idle
-     * so MpgCalculator has something realistic to chew on during dev.
-     */
-    public float readMAF() {
-        int rpm = readRPM();
-        float base = 2.0f + Math.max(0, (rpm - baseRPM)) * 0.03f;
-        float noise = (random.nextFloat() - 0.5f) * 0.5f;
-        return Math.max(0.5f, base + noise);
     }
 }

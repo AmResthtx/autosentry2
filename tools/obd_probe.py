@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OBD-II / ForScan-style probe for the 2000 F-250 7.3L Power Stroke.
+OBD-II / enhanced-PID probe for the 2000 F-250 7.3L Power Stroke.
 
 Purpose: find out, empirically, what this specific truck's PCM actually
 answers, instead of guessing from forum posts written for other trucks.
@@ -151,7 +151,7 @@ CANDIDATE_MODE22_PIDS = [
     ("Fuel Tank Level (enhanced)", "F42F"),
     ("Transmission Fluid Temp", "1E1C"),
     # 7.3L-specific guesses seen referenced (unverified) in Diesel Stop /
-    # PowerStrokeNation threads discussing ICP/IPR via FORScan:
+    # PowerStrokeNation threads discussing ICP/IPR:
     ("ICP (guess)", "1440"),
     ("ICP (guess 2)", "1442"),
     ("IPR Duty Cycle (guess)", "1130"),

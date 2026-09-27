@@ -149,7 +149,7 @@ public class TrackingService extends Service {
             return START_NOT_STICKY;
         }
         if (adapterAddress == null || adapterAddress.isEmpty()) {
-            stopReason = "No OBD adapter paired — tap Pair OBD Adapter";
+            stopReason = "No OBD adapter paired — tap Pair OBD Adapter in Account";
             stopSelf();
             return START_NOT_STICKY;
         }

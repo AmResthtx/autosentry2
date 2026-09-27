@@ -8,22 +8,71 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="4dp">
 
         <Button
             android:id="@+id/buttonTabDashboard"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:textAllCaps="false"
+            android:textSize="11sp"
             android:text="Dashboard" />
+
+        <Button
+            android:id="@+id/buttonTabDiagnostics"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:textAllCaps="false"
+            android:textSize="11sp"
+            android:text="Diagnostics" />
 
         <Button
             android:id="@+id/buttonTabService"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="Service" />
+            android:layout_marginStart="2dp"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:textAllCaps="false"
+            android:textSize="11sp"
+            android:text="History" />
+
+        <Button
+            android:id="@+id/buttonTabDeals"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:textAllCaps="false"
+            android:textSize="11sp"
+            android:text="Deals" />
+
+        <Button
+            android:id="@+id/buttonTabAccount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:textAllCaps="false"
+            android:textSize="11sp"
+            android:text="Account" />
     </LinearLayout>
 
     <FrameLayout
@@ -80,44 +129,40 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="Start Tracking" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="#33000000"
-                    android:layout_marginTop="16dp"
-                    android:layout_marginBottom="16dp" />
-
-                <Button
-                    android:id="@+id/buttonPairAdapter"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Pair OBD Adapter" />
-
-                <Button
-                    android:id="@+id/buttonAutoTrackingToggle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Auto-Tracking: On" />
-
-                <Button
-                    android:id="@+id/buttonBackgroundAccess"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Allow background start" />
-
-                <Button
-                    android:id="@+id/buttonDebugLog"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="View Debug Log" />
             </LinearLayout>
         </ScrollView>
 
-        <!-- ================= SERVICE TAB ================= -->
+        <!-- ================= DIAGNOSTICS TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollDiagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="No scans yet" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="Scan results will appear here after the truck has been scanned." />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= HISTORY TAB ================= -->
         <ScrollView
             android:id="@+id/scrollService"
             android:layout_width="match_parent"
@@ -205,6 +250,78 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="Maintenance History" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= DEALS TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollDeals"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="No deals matching alerts" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="Deals for parts your service schedule calls for will appear here." />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= ACCOUNT TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollAccount"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <Button
+                    android:id="@+id/buttonPairAdapter"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Pair OBD Adapter" />
+
+                <Button
+                    android:id="@+id/buttonAutoTrackingToggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Auto-Tracking: On" />
+
+                <Button
+                    android:id="@+id/buttonBackgroundAccess"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Allow background start" />
+
+                <Button
+                    android:id="@+id/buttonDebugLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="View Debug Log" />
             </LinearLayout>
         </ScrollView>
     </FrameLayout>

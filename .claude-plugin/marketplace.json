@@ -1,0 +1,18 @@
+{
+  "name": "autosentry",
+  "owner": {
+    "name": "AutoSentry"
+  },
+  "metadata": {
+    "description": "AutoSentry internal plugins."
+  },
+  "plugins": [
+    {
+      "name": "autosentry-carsxe",
+      "description": "CarsXE vehicle data APIs scoped to AutoSentry: DTC decode, VIN specs, recalls, market value, history, VIN OCR, YMM.",
+      "version": "1.0.0",
+      "source": "./plugins/autosentry-carsxe",
+      "license": "MIT"
+    }
+  ]
+}

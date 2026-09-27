@@ -1,0 +1,10 @@
+{
+  "name": "autosentry",
+  "description": "Free vehicle lookups for AutoSentry: NHTSA VIN decode, NHTSA recalls, VIN photo reading. No API keys.",
+  "version": "2.0.0",
+  "author": {
+    "name": "AutoSentry"
+  },
+  "license": "MIT",
+  "keywords": ["automotive", "vin", "recalls", "nhtsa", "7.3l", "powerstroke"]
+}

@@ -49,13 +49,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Two tabs: Dashboard (live readings the user picks via "Edit Dashboard",
- * plus adapter setup) and Service (oil life and the full service schedule,
- * driven by engine-on time and distance).
+ * Five tabs: Dashboard (live readings the user picks via "Edit Dashboard"),
+ * Diagnostics, History (oil life and the full service schedule, driven by
+ * engine-on time and distance), Deals, and Account (adapter setup).
  */
 public class MainActivity extends AppCompatActivity {
     private static final long REFRESH_INTERVAL_MS = 500L;
     private static final long DB_REFRESH_INTERVAL_MS = 1500L;
+    private static final int TAB_DASHBOARD = 0;
+    private static final int TAB_HISTORY = 2;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -64,15 +66,16 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
     private long lastDbRefresh = 0;
     private volatile VehicleProfile lastProfile;
-    private boolean dashboardTabVisible = true;
+    private int currentTab = TAB_DASHBOARD;
     // Runs once the Bluetooth permission dialog is answered with a grant.
     private Runnable afterPermissions;
 
     private final Map<Integer, TextView> tileValues = new HashMap<>();
     private GridLayout gridTiles;
-    private View scrollDashboard, scrollService;
+    private View[] tabViews;
+    private Button[] tabButtons;
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
-    private Button buttonTabDashboard, buttonTabService, buttonEditDashboard, buttonToggleTracking, buttonResetOil,
+    private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
             buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer;
 
@@ -84,16 +87,16 @@ public class MainActivity extends AppCompatActivity {
         db = AppDatabase.getInstance(this);
 
         gridTiles = findViewById(R.id.gridTiles);
-        scrollDashboard = findViewById(R.id.scrollDashboard);
-        scrollService = findViewById(R.id.scrollService);
+        tabViews = new View[]{findViewById(R.id.scrollDashboard), findViewById(R.id.scrollDiagnostics),
+                findViewById(R.id.scrollService), findViewById(R.id.scrollDeals), findViewById(R.id.scrollAccount)};
+        tabButtons = new Button[]{findViewById(R.id.buttonTabDashboard), findViewById(R.id.buttonTabDiagnostics),
+                findViewById(R.id.buttonTabService), findViewById(R.id.buttonTabDeals), findViewById(R.id.buttonTabAccount)};
         textAdapterStatus = findViewById(R.id.textAdapterStatus);
         textLiveStatus = findViewById(R.id.textLiveStatus);
         textOilLife = findViewById(R.id.textOilLife);
         textOilDetail = findViewById(R.id.textOilDetail);
         textOdometer = findViewById(R.id.textOdometer);
         textServiceList = findViewById(R.id.textServiceList);
-        buttonTabDashboard = findViewById(R.id.buttonTabDashboard);
-        buttonTabService = findViewById(R.id.buttonTabService);
         buttonEditDashboard = findViewById(R.id.buttonEditDashboard);
         buttonToggleTracking = findViewById(R.id.buttonToggleTracking);
         buttonResetOil = findViewById(R.id.buttonResetOil);
@@ -112,8 +115,10 @@ public class MainActivity extends AppCompatActivity {
             PermissionFlow.requestMissingPermissions(this);
         }
 
-        buttonTabDashboard.setOnClickListener(v -> showTab(true));
-        buttonTabService.setOnClickListener(v -> showTab(false));
+        for (int i = 0; i < tabButtons.length; i++) {
+            final int tab = i;
+            tabButtons[i].setOnClickListener(v -> showTab(tab));
+        }
         buttonEditDashboard.setOnClickListener(v -> showEditDashboard());
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
         buttonResetOil.setOnClickListener(v -> resetOilLife());
@@ -126,7 +131,7 @@ public class MainActivity extends AppCompatActivity {
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
 
         rebuildTiles();
-        showTab(true);
+        showTab(TAB_DASHBOARD);
 
         ioExecutor.execute(() -> {
             if (db.vehicleProfileDao().getSync() == null) {
@@ -183,13 +188,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showTab(boolean dashboard) {
-        dashboardTabVisible = dashboard;
-        scrollDashboard.setVisibility(dashboard ? View.VISIBLE : View.GONE);
-        scrollService.setVisibility(dashboard ? View.GONE : View.VISIBLE);
-        buttonTabDashboard.setEnabled(!dashboard);
-        buttonTabService.setEnabled(dashboard);
-        lastDbRefresh = 0; // refresh the service tab right away
+    private void showTab(int tab) {
+        currentTab = tab;
+        for (int i = 0; i < tabViews.length; i++) {
+            tabViews[i].setVisibility(i == tab ? View.VISIBLE : View.GONE);
+            tabButtons[i].setEnabled(i != tab);
+        }
+        lastDbRefresh = 0; // refresh the history tab right away
     }
 
     /** Start/stop by hand. Without a paired adapter this opens pairing instead. */
@@ -285,7 +290,7 @@ public class MainActivity extends AppCompatActivity {
         boolean autoEnabled = AppSettings.isAutoTrackingEnabled(this);
         buttonAutoTrackingToggle.setText(autoEnabled ? "Auto-Tracking: On" : "Auto-Tracking: Off");
         if (adapterName == null) {
-            textAdapterStatus.setText("No OBD adapter paired yet — tap \"Pair OBD Adapter\"");
+            textAdapterStatus.setText("Scanner not connected — pair your OBD adapter in the Account tab");
         } else if (autoEnabled) {
             textAdapterStatus.setText("Auto-tracking with: " + adapterName);
         } else {
@@ -526,9 +531,9 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** Service tab: oil life plus every scheduled item, from engine-on distance and time. */
+    /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
-        final boolean needServiceList = !dashboardTabVisible;
+        final boolean needServiceList = currentTab == TAB_HISTORY;
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             if (profile == null) return;

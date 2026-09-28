@@ -53,4 +53,5 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.7")
+    testImplementation("junit:junit:4.13.2")
 }

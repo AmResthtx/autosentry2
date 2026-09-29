@@ -58,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long DB_REFRESH_INTERVAL_MS = 1500L;
     private static final int TAB_DASHBOARD = 0;
     private static final int TAB_HISTORY = 2;
+    private static final String STOP_CONFIRM_WORD = "STOP";
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -200,7 +201,7 @@ public class MainActivity extends AppCompatActivity {
     /** Start/stop by hand. Without a paired adapter this opens pairing instead. */
     private void toggleTracking() {
         if (TrackingService.isRunning) {
-            stopService(new Intent(this, TrackingService.class));
+            confirmStopTracking();
             return;
         }
         if (!AppSettings.hasObdAdapterConfigured(this)) {
@@ -209,6 +210,31 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         withRequiredPermissions(this::startTrackingService);
+    }
+
+    /** Stopping by hand needs the confirm word typed, so a stray tap can't end the session. */
+    private void confirmStopTracking() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        input.setHint(STOP_CONFIRM_WORD);
+        FrameLayout container = new FrameLayout(this);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        container.setPadding(pad, 0, pad, 0);
+        container.addView(input);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Stop tracking the truck?")
+                .setMessage("Type " + STOP_CONFIRM_WORD + " to confirm.")
+                .setView(container)
+                .setPositiveButton("Stop Tracking", (dialog, which) -> {
+                    if (!STOP_CONFIRM_WORD.equalsIgnoreCase(input.getText().toString().trim())) {
+                        Toast.makeText(this, "Still tracking — type " + STOP_CONFIRM_WORD + " to stop", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    stopService(new Intent(this, TrackingService.class));
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     /**

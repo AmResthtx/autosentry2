@@ -167,6 +167,17 @@ public class ELM327Adapter {
         return clean(command("ATRV", AT_TIMEOUT_MS));
     }
 
+    /** OBD-port voltage in volts from ATRV, or 0 when the adapter's answer isn't a number. */
+    public synchronized double readVolts() throws IOException {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+(\\.\\d+)?)").matcher(readVoltage());
+        return m.find() ? Double.parseDouble(m.group(1)) : 0;
+    }
+
+    /** Raw reply to a trouble-code request (Mode 03/07/0A); parse with DTCReader. */
+    public synchronized String readTroubleCodesRaw(DTCReader.Mode mode) throws IOException {
+        return command(mode.request, PID_TIMEOUT_MS);
+    }
+
     private static String clean(String reply) {
         return reply.replace(">", "").replaceAll("\\s+", " ").trim();
     }

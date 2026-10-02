@@ -42,6 +42,8 @@ public class ELM327Adapter {
     private OutputStream outputStream = null;
     private String adapterAddress = null;
     private boolean connected = false;
+    // Which RFCOMM channel last connected; null until one has.
+    private Boolean useInsecure = null;
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
@@ -67,18 +69,18 @@ public class ELM327Adapter {
         }
 
         BluetoothDevice device = bluetoothAdapter.getRemoteDevice(adapterAddress);
-        try {
-            socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            socket.connect();
-        } catch (IOException | SecurityException first) {
-            // Many ELM327 clones only accept the insecure channel.
-            closeQuietly();
+        if (useInsecure != null) {
+            // Asleep adapters take ~5 s to time out per attempt; once one channel has
+            // worked, don't double every retry by also trying the other.
+            openSocket(device, useInsecure);
+        } else {
             try {
-                socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
-                socket.connect();
-            } catch (SecurityException se) {
-                closeQuietly();
-                throw new IOException("Bluetooth permission denied", se);
+                openSocket(device, false);
+                useInsecure = false;
+            } catch (IOException first) {
+                // Many ELM327 clones only accept the insecure channel.
+                openSocket(device, true);
+                useInsecure = true;
             }
         }
 
@@ -101,6 +103,21 @@ public class ELM327Adapter {
             throw e;
         }
         return true;
+    }
+
+    private void openSocket(BluetoothDevice device, boolean insecure) throws IOException {
+        try {
+            socket = insecure
+                    ? device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                    : device.createRfcommSocketToServiceRecord(SPP_UUID);
+            socket.connect();
+        } catch (IOException e) {
+            closeQuietly();
+            throw e;
+        } catch (SecurityException se) {
+            closeQuietly();
+            throw new IOException("Bluetooth permission denied", se);
+        }
     }
 
     public synchronized void disconnect() {
@@ -138,6 +155,20 @@ public class ELM327Adapter {
         } catch (IOException e) {
             return "unknown";
         }
+    }
+
+    /** Adapter's own ID string (e.g. "ELM327 v1.5" or "STN1155 v4.x"). Works with the key off. */
+    public synchronized String identify() throws IOException {
+        return clean(command("ATI", AT_TIMEOUT_MS));
+    }
+
+    /** Voltage at the OBD port as the adapter measures it (e.g. "12.6V"). Works with the key off. */
+    public synchronized String readVoltage() throws IOException {
+        return clean(command("ATRV", AT_TIMEOUT_MS));
+    }
+
+    private static String clean(String reply) {
+        return reply.replace(">", "").replaceAll("\\s+", " ").trim();
     }
 
     /**

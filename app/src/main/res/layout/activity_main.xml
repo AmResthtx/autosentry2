@@ -121,7 +121,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="Edit Dashboard" />
+                    android:text="Choose Readings (PIDs)" />
 
                 <Button
                     android:id="@+id/buttonToggleTracking"
@@ -301,6 +301,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Pair OBD Adapter" />
+
+                <Button
+                    android:id="@+id/buttonTestConnection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Test OBD Connection" />
 
                 <Button
                     android:id="@+id/buttonAutoTrackingToggle"

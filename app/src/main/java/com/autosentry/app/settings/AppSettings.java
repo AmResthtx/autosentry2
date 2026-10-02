@@ -16,6 +16,8 @@ public final class AppSettings {
     private static final String KEY_ADAPTER_ADDRESS = "obd_adapter_address";
     private static final String KEY_ADAPTER_NAME = "obd_adapter_name";
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
+    // Set when the user types STOP; keeps boot/watchdog restarts off until they tap Start again.
+    private static final String KEY_TRACKING_PAUSED = "tracking_paused";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
     // Set once Trip Time has been put on a saved dashboard (or the user saved their own).
@@ -52,6 +54,14 @@ public final class AppSettings {
 
     public static boolean isAutoTrackingEnabled(Context context) {
         return prefs(context).getBoolean(KEY_AUTO_TRACKING_ENABLED, true);
+    }
+
+    public static void setTrackingPaused(Context context, boolean paused) {
+        prefs(context).edit().putBoolean(KEY_TRACKING_PAUSED, paused).apply();
+    }
+
+    public static boolean isTrackingPaused(Context context) {
+        return prefs(context).getBoolean(KEY_TRACKING_PAUSED, false);
     }
 
     public static List<Integer> getDashboardPids(Context context) {

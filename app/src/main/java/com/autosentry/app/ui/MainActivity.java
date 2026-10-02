@@ -20,6 +20,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -78,7 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer;
+            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,6 +109,7 @@ public class MainActivity extends AppCompatActivity {
         buttonBackgroundAccess = findViewById(R.id.buttonBackgroundAccess);
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
         buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
+        buttonTestConnection = findViewById(R.id.buttonTestConnection);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
         }
@@ -130,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
         buttonBackgroundAccess.setOnClickListener(v -> requestBackgroundAccess());
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
+        buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
 
         rebuildTiles();
         showTab(TAB_DASHBOARD);
@@ -175,10 +178,7 @@ public class MainActivity extends AppCompatActivity {
      * itself waits for the truck to be running before it records anything.
      */
     private void maybeAutoStartTracking() {
-        if (TrackingService.isRunning) return;
-        if (!AppSettings.hasObdAdapterConfigured(this) || !AppSettings.isAutoTrackingEnabled(this)) return;
-        if (!PermissionFlow.hasRequiredPermissions(this)) return;
-        startTrackingService();
+        TrackingService.startIfEnabled(this, "app opened");
     }
 
     private void startTrackingService() {
@@ -209,6 +209,7 @@ public class MainActivity extends AppCompatActivity {
             pickObdAdapter();
             return;
         }
+        AppSettings.setTrackingPaused(this, false);
         withRequiredPermissions(this::startTrackingService);
     }
 
@@ -224,13 +225,15 @@ public class MainActivity extends AppCompatActivity {
 
         new AlertDialog.Builder(this)
                 .setTitle("Stop tracking the truck?")
-                .setMessage("Type " + STOP_CONFIRM_WORD + " to confirm.")
+                .setMessage("Tracking stays off — even at key-on — until you tap Start Tracking. "
+                        + "Type " + STOP_CONFIRM_WORD + " to confirm.")
                 .setView(container)
                 .setPositiveButton("Stop Tracking", (dialog, which) -> {
                     if (!STOP_CONFIRM_WORD.equalsIgnoreCase(input.getText().toString().trim())) {
                         Toast.makeText(this, "Still tracking — type " + STOP_CONFIRM_WORD + " to stop", Toast.LENGTH_SHORT).show();
                         return;
                     }
+                    AppSettings.setTrackingPaused(this, true);
                     stopService(new Intent(this, TrackingService.class));
                 })
                 .setNegativeButton("Cancel", null)
@@ -239,9 +242,9 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * One-time setup: lists already-paired Bluetooth devices and lets the
-     * user tap which one is the ELM327/OBDLink adapter. After this, walking
-     * up to the truck is the only "action" needed — BluetoothConnectionReceiver
-     * takes it from here automatically.
+     * user tap which one is the ELM327/OBDLink adapter. After this, turning
+     * the key is the only "action" needed — TrackingService keeps retrying the
+     * adapter and picks the trip up automatically.
      */
     private void pickObdAdapter() {
         if (!PermissionFlow.hasRequiredPermissions(this)) {
@@ -295,6 +298,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     AppSettings.setObdAdapter(this, chosen.getAddress(), name);
                     AppSettings.setAutoTrackingEnabled(this, true);
+                    AppSettings.setTrackingPaused(this, false);
                     Toast.makeText(this, "Paired: " + name + ". Tracking will now start automatically when it connects.", Toast.LENGTH_LONG).show();
                     refreshAdapterStatusUi();
                     // Restart so a running session switches over to the newly chosen adapter.
@@ -309,6 +313,62 @@ public class MainActivity extends AppCompatActivity {
         boolean newState = !AppSettings.isAutoTrackingEnabled(this);
         AppSettings.setAutoTrackingEnabled(this, newState);
         refreshAdapterStatusUi();
+        if (newState) maybeAutoStartTracking();
+    }
+
+    /**
+     * Step-by-step check of everything a tracked trip depends on. The service runs it
+     * (it owns the adapter link), and this dialog shows the report as it fills in.
+     */
+    private void showConnectionTest() {
+        if (!AppSettings.hasObdAdapterConfigured(this)) {
+            Toast.makeText(this, "Pair your OBD adapter first", Toast.LENGTH_SHORT).show();
+            pickObdAdapter();
+            return;
+        }
+        TextView report = new TextView(this);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        report.setPadding(pad, pad / 2, pad, 0);
+        report.setTextSize(15);
+        report.setTextIsSelectable(true);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(report);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("OBD connection test")
+                .setView(scroll)
+                .setNeutralButton("Run Again", null)
+                .setPositiveButton("Close", null)
+                .create();
+        Runnable update = new Runnable() {
+            @Override
+            public void run() {
+                report.setText(LiveReadings.testReport);
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setEnabled(!LiveReadings.testRunning);
+                uiHandler.postDelayed(this, REFRESH_INTERVAL_MS);
+            }
+        };
+        dialog.setOnShowListener(d -> {
+            // Set here so tapping it doesn't close the dialog.
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> startConnectionTest());
+            uiHandler.post(update);
+        });
+        dialog.setOnDismissListener(d -> uiHandler.removeCallbacks(update));
+        startConnectionTest();
+        dialog.show();
+    }
+
+    private void startConnectionTest() {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = "Testing… (up to 30 s if the adapter is asleep)";
+        AppSettings.setTrackingPaused(this, false);
+        try {
+            ContextCompat.startForegroundService(this, new Intent(this, TrackingService.class)
+                    .setAction(TrackingService.ACTION_RUN_TEST));
+        } catch (RuntimeException e) {
+            LiveReadings.testRunning = false;
+            LiveReadings.testReport = "✗ Couldn't start tracking: " + e.getMessage();
+        }
     }
 
     private void refreshAdapterStatusUi() {
@@ -500,44 +560,35 @@ public class MainActivity extends AppCompatActivity {
 
         if (!any) {
             TextView hint = new TextView(this);
-            hint.setText("No readings selected — tap Edit Dashboard to pick some.");
+            hint.setText("No readings selected — tap Choose Readings (PIDs) to pick some.");
             gridTiles.addView(hint);
         }
     }
 
-    /** Lets the user pick which readings appear on the dashboard. */
+    /**
+     * Lets the user pick which readings (PIDs) are read and shown. Every reading is
+     * offered; ones the truck hasn't confirmed are labeled so, and their tile says
+     * "Not supported" if the truck never answers them.
+     */
     private void showEditDashboard() {
         Set<Integer> supported = !LiveReadings.supported.isEmpty()
                 ? LiveReadings.supported : AppSettings.getSupportedPids(this);
-        if (supported.isEmpty()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Connect to the truck first")
-                    .setMessage("AutoSentry doesn't know yet which readings this truck reports. "
-                            + "Start tracking with the engine running once, then come back here — "
-                            + "you'll still be able to pick the computed ones (MPG, distance, odometer) now.")
-                    .setPositiveButton("Pick computed readings", (d, w) -> showEditDashboardOptions(supported))
-                    .setNegativeButton("Cancel", null)
-                    .show();
-            return;
-        }
-        showEditDashboardOptions(supported);
-    }
-
-    private void showEditDashboardOptions(Set<Integer> supported) {
-        List<PidCatalog.Pid> options = PidCatalog.available(supported);
+        List<PidCatalog.Pid> options = new ArrayList<>(PidCatalog.all());
         List<Integer> current = AppSettings.getDashboardPids(this);
 
         String[] labels = new String[options.size()];
         boolean[] checked = new boolean[options.size()];
         for (int i = 0; i < options.size(); i++) {
-            labels[i] = options.get(i).label();
-            checked[i] = current.contains(options.get(i).id);
+            PidCatalog.Pid pid = options.get(i);
+            String note = "";
+            if (!pid.computed && supported.isEmpty()) note = "  — not checked on the truck yet";
+            else if (!pid.computed && !supported.contains(pid.id)) note = "  — truck didn't answer";
+            labels[i] = pid.label() + note;
+            checked[i] = current.contains(pid.id);
         }
 
         new AlertDialog.Builder(this)
-                .setTitle(supported.isEmpty()
-                        ? "Choose readings (connect to the truck to see which it supports)"
-                        : "Choose readings to show")
+                .setTitle("Choose readings (PIDs) to track")
                 .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Save", (dialog, which) -> {
                     List<Integer> chosen = new ArrayList<>();

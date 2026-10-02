@@ -36,6 +36,8 @@ public final class NotificationUtils {
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setContentTitle("AutoSentry tracking trip");
+                // Show right away instead of Android 12+'s default 10 s delay.
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setContentTitle("AutoSentry is watching the truck");
     }
 }

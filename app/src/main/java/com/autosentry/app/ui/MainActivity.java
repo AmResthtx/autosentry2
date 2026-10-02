@@ -1,5 +1,6 @@
 package com.autosentry.app.ui;
 
+import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -8,6 +9,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -384,16 +386,28 @@ public class MainActivity extends AppCompatActivity {
         }
         PowerManager pm = getSystemService(PowerManager.class);
         boolean allowed = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
-        buttonBackgroundAccess.setText(allowed
-                ? "Background start: Allowed"
-                : "Allow background start (needed for auto-start)");
+        buttonBackgroundAccess.setText(!allowed ? "Allow background start (needed for auto-start)"
+                : !exactAlarmsAllowed() ? "Allow low-power waiting (alarms)"
+                : "Background start: Allowed");
+    }
+
+    /** Exact alarms let tracking sleep while the truck is off and still check for key-on every 15 s. */
+    private boolean exactAlarmsAllowed() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        return alarms != null && alarms.canScheduleExactAlarms();
     }
 
     /** Android only lets an app start tracking from a closed state if the user exempts it from battery optimization. */
     private void requestBackgroundAccess() {
         PowerManager pm = getSystemService(PowerManager.class);
         if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
-            Toast.makeText(this, "Already allowed", Toast.LENGTH_SHORT).show();
+            if (exactAlarmsAllowed()) {
+                Toast.makeText(this, "Already allowed", Toast.LENGTH_SHORT).show();
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                        Uri.parse("package:" + getPackageName())));
+            }
             return;
         }
         try {

@@ -1,10 +1,14 @@
 package com.autosentry.app.service;
 
 import android.Manifest;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
@@ -12,6 +16,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -44,6 +49,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
@@ -59,13 +65,15 @@ import java.util.concurrent.atomic.DoubleAdder;
  * from GPS otherwise (and from GPS across any gap in OBD data mid-drive).
  * Requires a paired adapter; one that fails to connect is retried, never faked.
  *
- * The service runs all the time, not just while driving. An OBD adapter never
- * opens the Bluetooth link itself — the tablet has to — so waiting for Android
- * to report a connection means waiting for someone to open the app. Instead the
- * service keeps knocking (about every 6 s while the adapter is asleep) and the
- * trip starts within seconds of key-on. It is restarted on boot, app update and
- * by a 15-minute watchdog, and only a typed STOP or turning auto-tracking off
- * keeps it down.
+ * An OBD adapter never opens the Bluetooth link itself — the tablet has to — so
+ * something must stay around to notice key-on. Two modes:
+ *   - Truck on (engine turning, trip open): full power. CPU kept awake, 4 polls
+ *     a second, GPS on, a dropped link retried every second.
+ *   - Truck off: low power. No wake lock, no GPS, adapter link closed so it can
+ *     sleep; an exact alarm wakes the tablet every 15 s for one quick knock, and
+ *     unlocking the screen or plugging in power knocks at once.
+ * It is restarted on boot, app update and by a 15-minute watchdog, and only a
+ * typed STOP or turning auto-tracking off keeps it down.
  */
 public class TrackingService extends Service {
     private static final String TAG = "TrackingService";
@@ -75,10 +83,13 @@ public class TrackingService extends Service {
 
     /** Runs the step-by-step adapter check (see runConnectionTest) on the poll thread. */
     public static final String ACTION_RUN_TEST = "com.autosentry.app.RUN_CONNECTION_TEST";
+    private static final String ACTION_IDLE_CHECK = "com.autosentry.app.IDLE_CHECK";
 
     private static final long POLL_INTERVAL_MS = 250L;
-    // Retry as fast as the adapter allows; a sleeping adapter's connect attempt already takes ~5 s.
+    // Mid-trip link loss: retry as fast as the adapter allows (a failed connect already takes ~5 s).
     private static final long RETRY_INTERVAL_MS = 1000L;
+    // Truck off: one knock this often. Covers the 7.3L's glow-plug wait between key-on and crank.
+    private static final long IDLE_CHECK_INTERVAL_MS = 15_000L;
     private static final long PERSIST_INTERVAL_MS = 1000L;
     private static final long END_TRIP_AFTER_ENGINE_OFF_MS = 120_000L;
     // A longer gap than this (reconnect, stall) is not driving time; don't bill it to the trip.
@@ -135,6 +146,17 @@ public class TrackingService extends Service {
     private volatile String stopReason;
 
     private final Runnable pollTask = this::pollTick;
+    // True while the poll loop is parked on the idle alarm; whoever flips it back owns restarting the loop.
+    private final AtomicBoolean idleWaiting = new AtomicBoolean(false);
+    private PendingIntent idleCheckIntent;
+
+    // Screen unlocked or power plugged in (truck-powered chargers switch on at key-on): knock now.
+    private final BroadcastReceiver wakeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            wakeFromIdle();
+        }
+    };
 
     /**
      * Starts tracking unless the user turned it off (auto-tracking off or typed STOP).
@@ -173,6 +195,14 @@ public class TrackingService extends Service {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AutoSentry:tracking");
             wakeLock.setReferenceCounted(false);
         }
+
+        idleCheckIntent = PendingIntent.getService(this, 0,
+                new Intent(this, TrackingService.class).setAction(ACTION_IDLE_CHECK),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        IntentFilter wakeEvents = new IntentFilter(Intent.ACTION_USER_PRESENT);
+        wakeEvents.addAction(Intent.ACTION_SCREEN_ON);
+        wakeEvents.addAction(Intent.ACTION_POWER_CONNECTED);
+        ContextCompat.registerReceiver(this, wakeReceiver, wakeEvents, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     @Override
@@ -181,6 +211,7 @@ public class TrackingService extends Service {
         if (started) {
             // Already running; a second start must not spawn a second poll loop.
             if (runTest) queueConnectionTest();
+            if (runTest || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
             return START_STICKY;
         }
         started = true;
@@ -297,23 +328,83 @@ public class TrackingService extends Service {
         try {
             ioExecutor.execute(() -> {
                 long delay = POLL_INTERVAL_MS;
+                boolean truckOff;
                 try {
                     if (stopped) return;
                     if (!ensureConnected() || !ensureTruckAnswering()) {
                         delay = RETRY_INTERVAL_MS;
+                        truckOff = activeSession == null; // mid-trip: keep retrying at full speed
                     } else {
                         pollOnce();
+                        truckOff = parkedLongEnough(System.currentTimeMillis());
                     }
                 } catch (Exception e) {
                     AppLog.e(this, TAG, "Poll failed, will reconnect", e);
                     handleLinkLoss();
                     delay = RETRY_INTERVAL_MS;
+                    truckOff = activeSession == null;
                 }
-                if (!stopped) mainHandler.postDelayed(pollTask, delay);
+                if (stopped) return;
+                if (truckOff) {
+                    waitForKeyOn();
+                } else {
+                    mainHandler.postDelayed(pollTask, delay);
+                }
             });
         } catch (RejectedExecutionException ignored) {
             // Service is shutting down.
         }
+    }
+
+    /** Connected but no trip and the engine has been off as long as it takes to close one. */
+    private boolean parkedLongEnough(long now) {
+        return activeSession == null && engineOffSince != 0
+                && now - engineOffSince > END_TRIP_AFTER_ENGINE_OFF_MS;
+    }
+
+    /**
+     * Low-power mode until the next knock: drop the adapter link so it can sleep, stop GPS,
+     * release the wake lock, and let an exact alarm wake the tablet for the next check.
+     */
+    private void waitForKeyOn() {
+        if (realAdapter.isConnected()) {
+            realAdapter.disconnect();
+            supportedPids = Collections.emptySet();
+        }
+        engineOffSince = 0;
+        LiveReadings.clearValues();
+        LiveReadings.status = "Truck off — waiting for key-on";
+        updateNotification("Waiting for key-on");
+        mainHandler.post(this::stopGps);
+
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        boolean exactAllowed = alarms != null
+                && (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms());
+        if (!exactAllowed) {
+            // Without exact alarms nothing wakes a sleeping tablet on time, so stay awake
+            // and knock on a timer rather than miss key-on.
+            mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
+        idleWaiting.set(true);
+        try {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + IDLE_CHECK_INTERVAL_MS, idleCheckIntent);
+        } catch (SecurityException e) {
+            // Permission pulled since the check; stay awake instead (unless a wake event already took over).
+            if (idleWaiting.compareAndSet(true, false)) mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+    }
+
+    /** Ends the low-power wait early (alarm fired, screen on, power in, test asked) and polls now. */
+    private void wakeFromIdle() {
+        if (!idleWaiting.compareAndSet(true, false)) return; // loop already running
+        if (wakeLock != null) wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        if (alarms != null) alarms.cancel(idleCheckIntent);
+        mainHandler.post(pollTask);
     }
 
     private boolean ensureConnected() {
@@ -432,6 +523,11 @@ public class TrackingService extends Service {
             boolean exempt = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
             ok &= testLine(r, exempt, "Background start allowed",
                     "Background start NOT allowed — Android can block key-on auto-start. Fix: Account > Allow background start");
+            AlarmManager alarms = getSystemService(AlarmManager.class);
+            testLine(r, Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                            || (alarms != null && alarms.canScheduleExactAlarms()),
+                    "Alarms allowed (low-power waiting while the truck is off)",
+                    "Alarms not allowed — the tablet stays awake while the truck is off. Fix: Account > Allow low-power waiting");
             testLine(r, gpsTracker.hasPermission(), "Location allowed (GPS fills OBD gaps)",
                     "Location not allowed — distance relies on the truck's speed only");
 
@@ -726,7 +822,7 @@ public class TrackingService extends Service {
     }
 
     private android.app.Notification buildNotification(String text) {
-        NotificationCompat.Builder builder = NotificationUtils.trackingNotificationBuilder(this)
+        NotificationCompat.Builder builder = NotificationUtils.trackingNotificationBuilder(this, activeSession != null)
                 .setContentText(text);
         return builder.build();
     }
@@ -745,6 +841,9 @@ public class TrackingService extends Service {
         stopped = true;
         isRunning = false;
         mainHandler.removeCallbacks(pollTask);
+        unregisterReceiver(wakeReceiver);
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        if (alarms != null) alarms.cancel(idleCheckIntent);
         gpsTracker.stop();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         LiveReadings.clearValues();

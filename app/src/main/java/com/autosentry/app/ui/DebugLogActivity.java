@@ -12,14 +12,20 @@ import androidx.core.content.FileProvider;
 
 import com.autosentry.app.R;
 import com.autosentry.app.util.AppLog;
+import com.autosentry.app.util.TabletFiles;
 
 import java.io.File;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * On-device view of AppLog — the whole point is being able to see what
  * broke without a PC nearby, since this tablet lives in the truck.
  * "Share" hands the raw log file to whatever app (Messages, email, etc.)
- * so it can be sent off the device for a closer look.
+ * so it can be sent off the device for a closer look. "Save to tablet"
+ * keeps a copy in Downloads/AutoSentry for when there's no internet.
  */
 public class DebugLogActivity extends AppCompatActivity {
     private TextView textLogContent;
@@ -32,10 +38,12 @@ public class DebugLogActivity extends AppCompatActivity {
         textLogContent = findViewById(R.id.textLogContent);
         Button buttonRefresh = findViewById(R.id.buttonRefreshLog);
         Button buttonShare = findViewById(R.id.buttonShareLog);
+        Button buttonSave = findViewById(R.id.buttonSaveLog);
         Button buttonClear = findViewById(R.id.buttonClearLog);
 
         buttonRefresh.setOnClickListener(v -> loadLog());
         buttonShare.setOnClickListener(v -> shareLog());
+        buttonSave.setOnClickListener(v -> saveLog());
         buttonClear.setOnClickListener(v -> {
             AppLog.clear(this);
             loadLog();
@@ -47,6 +55,16 @@ public class DebugLogActivity extends AppCompatActivity {
 
     private void loadLog() {
         textLogContent.setText(AppLog.readAll(this));
+    }
+
+    private void saveLog() {
+        String name = "debug_log_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date()) + ".txt";
+        try {
+            String where = TabletFiles.save(this, name, AppLog.readAll(this));
+            Toast.makeText(this, "Saved to " + where, Toast.LENGTH_LONG).show();
+        } catch (IOException | RuntimeException e) {
+            Toast.makeText(this, "Couldn't save: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void shareLog() {

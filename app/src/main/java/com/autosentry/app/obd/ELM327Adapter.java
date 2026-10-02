@@ -217,16 +217,38 @@ public class ELM327Adapter {
      * oil-temp PID. Returns Celsius, or NaN when the truck had no usable answer.
      */
     public synchronized double readFordEngineOilTempC() throws IOException {
-        String reply;
+        return decodeFordOilTempC(readFord("1310")[0]);
+    }
+
+    /**
+     * Injection control pressure (psi) and IPR duty (%) for the crank check, from Ford's
+     * enhanced PIDs 1446 and 1434, scaled per ScanGauge's published 7.3L X-Gauge codes.
+     * NaN where the truck had no usable answer.
+     */
+    public synchronized double[] readFordIcpIpr() throws IOException {
+        int[][] data = readFord("1446", "1434");
+        return new double[]{decodeFordIcpPsi(data[0]), decodeFordIprPercent(data[1])};
+    }
+
+    /** Asks the PCM directly for each Mode 22 PID under one header switch; null where it had no answer. */
+    private int[][] readFord(String... pids) throws IOException {
+        int[][] data = new int[pids.length][];
+        StringBuilder replies = new StringBuilder();
         command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
         try {
-            reply = command("221310", PID_TIMEOUT_MS);
+            for (int i = 0; i < pids.length; i++) {
+                String reply = command("22" + pids[i], PID_TIMEOUT_MS);
+                if (replies.length() > 0) replies.append(" | ");
+                replies.append(reply.replace(">", "").replaceAll("\\s+", " ").trim());
+                data[i] = parseReply(reply, "62" + pids[i]);
+            }
         } finally {
             command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
         }
-        lastEnhancedReply = reply.replace(">", "").replaceAll("\\s+", " ").trim();
-        return decodeFordOilTempC(parseReply(reply, "621310"));
+        lastEnhancedReply = replies.toString();
+        return data;
     }
+
 
     /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
     public synchronized String lastEnhancedReply() {
@@ -237,6 +259,16 @@ public class ELM327Adapter {
         if (data == null || data.length < 2) return Double.NaN;
         double celsius = (data[0] * 256 + data[1]) / 100.0 - 40;
         return celsius > 200 ? Double.NaN : celsius; // beyond any real oil temp: open/shorted sensor
+    }
+
+    static double decodeFordIcpPsi(int[] data) {
+        if (data == null || data.length < 2) return Double.NaN;
+        return (data[0] * 256 + data[1]) * 0.56;
+    }
+
+    static double decodeFordIprPercent(int[] data) {
+        if (data == null || data.length < 1) return Double.NaN;
+        return data[0] * 100.0 / 255.0;
     }
 
     static int[] parseMode01(String response, int pid) {

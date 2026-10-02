@@ -34,7 +34,7 @@ public final class NotificationUtils {
         // unlike the always-on tracking notification which stays quiet.
         NotificationChannel alerts = new NotificationChannel(
                 CHANNEL_ALERTS, "Service Alerts", NotificationManager.IMPORTANCE_HIGH);
-        alerts.setDescription("Warns when a maintenance item is approaching its service interval");
+        alerts.setDescription("Maintenance coming due, engine stalls and crank results");
         manager.createNotificationChannel(alerts);
     }
 

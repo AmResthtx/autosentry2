@@ -34,6 +34,8 @@ import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.MaintenanceEvent;
+import com.autosentry.app.data.Session;
+import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
 import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
 import com.autosentry.app.maintenance.ServiceItemType;
@@ -42,8 +44,12 @@ import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
+import com.autosentry.app.util.TabletFiles;
 
+import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -85,7 +91,8 @@ public class MainActivity extends AppCompatActivity {
             textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck;
+            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
+            buttonSaveTrips;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -118,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
         buttonTestConnection = findViewById(R.id.buttonTestConnection);
         buttonKoeoCheck = findViewById(R.id.buttonKoeoCheck);
         textKoeoReports = findViewById(R.id.textKoeoReports);
+        buttonSaveTrips = findViewById(R.id.buttonSaveTrips);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
         }
@@ -142,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
         buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
         buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
+        buttonSaveTrips.setOnClickListener(v -> saveTripsToTablet());
 
         rebuildTiles();
         showTab(TAB_DASHBOARD);
@@ -457,6 +466,42 @@ public class MainActivity extends AppCompatActivity {
             lastDbRefresh = 0;
             uiHandler.post(() -> Toast.makeText(this, String.format(Locale.US,
                     "Oil change logged at %,.0f mi", profile.odometerMiles), Toast.LENGTH_SHORT).show());
+        });
+    }
+
+    /** Every trip, and every once-a-second point in it, as two CSV files on the tablet. No internet needed. */
+    private void saveTripsToTablet() {
+        ioExecutor.execute(() -> {
+            String stamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
+            SimpleDateFormat time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+            String message;
+            try {
+                List<Session> sessions = db.sessionDao().getAllSync();
+                String where = TabletFiles.save(this, "trips_" + stamp + ".csv", out -> {
+                    out.write("Trip,Start,End,Start odometer mi,Distance mi,Fuel gal,Avg MPG,Max speed mph\n");
+                    for (Session s : sessions) {
+                        out.write(String.format(Locale.US, "%d,%s,%s,%.1f,%.2f,%.3f,%.1f,%.0f\n",
+                                s.id, time.format(new Date(s.startTimestamp)),
+                                s.endTimestamp > 0 ? time.format(new Date(s.endTimestamp)) : "",
+                                s.startOdometerMiles, s.distanceMiles, s.fuelGallonsUsed, s.avgMpg, s.maxSpeedMph));
+                    }
+                });
+                TabletFiles.save(this, "trip_points_" + stamp + ".csv", out -> {
+                    out.write("Trip,Time,Latitude,Longitude,Speed mph,RPM,MAF g/s,Instant MPG,Miles since last point\n");
+                    for (Session s : sessions) {
+                        for (TripPoint p : db.tripPointDao().getForSession(s.id)) {
+                            out.write(String.format(Locale.US, "%d,%s,%.6f,%.6f,%.1f,%d,%.2f,%.1f,%.4f\n",
+                                    p.sessionId, time.format(new Date(p.timestamp)), p.latitude, p.longitude,
+                                    p.speedMph, p.rpm, p.mafGramsPerSec, p.instantMpg, p.distanceDeltaMiles));
+                        }
+                    }
+                });
+                message = sessions.size() + " trips saved to " + where.substring(0, where.lastIndexOf('/'));
+            } catch (IOException | RuntimeException e) {
+                message = "Couldn't save trips: " + e.getMessage();
+            }
+            String toast = message;
+            uiHandler.post(() -> Toast.makeText(this, toast, Toast.LENGTH_LONG).show());
         });
     }
 

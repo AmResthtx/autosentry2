@@ -32,6 +32,7 @@ import androidx.core.content.ContextCompat;
 import com.autosentry.app.BuildConfig;
 import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
+import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.VehicleProfile;
 import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
@@ -60,7 +61,9 @@ public class MainActivity extends AppCompatActivity {
     private static final long REFRESH_INTERVAL_MS = 500L;
     private static final long DB_REFRESH_INTERVAL_MS = 1500L;
     private static final int TAB_DASHBOARD = 0;
+    private static final int TAB_DIAGNOSTICS = 1;
     private static final int TAB_HISTORY = 2;
+    private static final int KOEO_REPORTS_SHOWN = 5;
     private static final String STOP_CONFIRM_WORD = "STOP";
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
@@ -78,10 +81,11 @@ public class MainActivity extends AppCompatActivity {
     private GridLayout gridTiles;
     private View[] tabViews;
     private Button[] tabButtons;
-    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
+    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList,
+            textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection;
+            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,6 +116,8 @@ public class MainActivity extends AppCompatActivity {
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
         buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
         buttonTestConnection = findViewById(R.id.buttonTestConnection);
+        buttonKoeoCheck = findViewById(R.id.buttonKoeoCheck);
+        textKoeoReports = findViewById(R.id.textKoeoReports);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
         }
@@ -135,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
         buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
+        buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
 
         rebuildTiles();
         showTab(TAB_DASHBOARD);
@@ -323,6 +330,19 @@ public class MainActivity extends AppCompatActivity {
      * (it owns the adapter link), and this dialog shows the report as it fills in.
      */
     private void showConnectionTest() {
+        showServiceReport("OBD connection test", TrackingService.ACTION_RUN_TEST,
+                "Testing… (up to 30 s if the adapter is asleep)");
+    }
+
+    /** Key on, engine off: battery, readings and trouble codes now; the next crank gets timed. */
+    private void showKoeoCheck() {
+        showServiceReport("Key-on engine-off check", TrackingService.ACTION_RUN_KOEO,
+                "Reading the truck… keep the key ON, engine off");
+        lastDbRefresh = 0;
+    }
+
+    /** Runs {@code action} in the service and shows its LiveReadings.testReport as it fills in. */
+    private void showServiceReport(String title, String action, String waitingText) {
         if (!AppSettings.hasObdAdapterConfigured(this)) {
             Toast.makeText(this, "Pair your OBD adapter first", Toast.LENGTH_SHORT).show();
             pickObdAdapter();
@@ -337,7 +357,7 @@ public class MainActivity extends AppCompatActivity {
         scroll.addView(report);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("OBD connection test")
+                .setTitle(title)
                 .setView(scroll)
                 .setNeutralButton("Run Again", null)
                 .setPositiveButton("Close", null)
@@ -352,21 +372,24 @@ public class MainActivity extends AppCompatActivity {
         };
         dialog.setOnShowListener(d -> {
             // Set here so tapping it doesn't close the dialog.
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> startConnectionTest());
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> startServiceReport(action, waitingText));
             uiHandler.post(update);
         });
-        dialog.setOnDismissListener(d -> uiHandler.removeCallbacks(update));
-        startConnectionTest();
+        dialog.setOnDismissListener(d -> {
+            uiHandler.removeCallbacks(update);
+            lastDbRefresh = 0; // show a new KOEO report on the Diagnostics tab right away
+        });
+        startServiceReport(action, waitingText);
         dialog.show();
     }
 
-    private void startConnectionTest() {
+    private void startServiceReport(String action, String waitingText) {
         LiveReadings.testRunning = true;
-        LiveReadings.testReport = "Testing… (up to 30 s if the adapter is asleep)";
+        LiveReadings.testReport = waitingText;
         AppSettings.setTrackingPaused(this, false);
         try {
             ContextCompat.startForegroundService(this, new Intent(this, TrackingService.class)
-                    .setAction(TrackingService.ACTION_RUN_TEST));
+                    .setAction(action));
         } catch (RuntimeException e) {
             LiveReadings.testRunning = false;
             LiveReadings.testReport = "✗ Couldn't start tracking: " + e.getMessage();
@@ -625,6 +648,7 @@ public class MainActivity extends AppCompatActivity {
     /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
         final boolean needServiceList = currentTab == TAB_HISTORY;
+        final boolean needKoeo = currentTab == TAB_DIAGNOSTICS;
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             if (profile == null) return;
@@ -644,6 +668,19 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            StringBuilder koeoSb = new StringBuilder();
+            if (needKoeo) {
+                for (KoeoReport report : db.koeoReportDao().latest(KOEO_REPORTS_SHOWN)) {
+                    if (koeoSb.length() > 0) koeoSb.append("\n\n");
+                    koeoSb.append(report.summary());
+                }
+                if (koeoSb.length() == 0) {
+                    koeoSb.append("No key-on checks yet. One is taken automatically each time the key is "
+                            + "turned ON before cranking, or tap Run Key-On Check with the key ON, engine off.");
+                }
+            }
+            final String koeoText = koeoSb.toString();
+
             uiHandler.post(() -> {
                 textOilLife.setText(String.format(Locale.US, "Oil life: %.0f%%", profile.oilLifePercent));
                 textOdometer.setText(profile.odometerMiles > 0
@@ -653,6 +690,7 @@ public class MainActivity extends AppCompatActivity {
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));
                 if (needServiceList) textServiceList.setText(sb.toString());
+                if (needKoeo) textKoeoReports.setText(koeoText);
             });
         });
     }

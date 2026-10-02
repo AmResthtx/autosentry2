@@ -12,8 +12,6 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Real ELM327 / OBDLink Bluetooth adapter layer.
@@ -37,7 +35,6 @@ public class ELM327Adapter {
     // from the tester (F1); Mode 01 needs the functional OBD header back afterwards.
     private static final String FORD_PCM_HEADER = "ATSHC410F1";
     private static final String OBD_PWM_HEADER = "ATSH616AF1";
-    private static final Pattern VOLTS = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*V", Pattern.CASE_INSENSITIVE);
 
     private BluetoothSocket socket = null;
     private String lastEnhancedReply = "";
@@ -45,6 +42,8 @@ public class ELM327Adapter {
     private OutputStream outputStream = null;
     private String adapterAddress = null;
     private boolean connected = false;
+    // Which RFCOMM channel last connected; null until one has.
+    private Boolean useInsecure = null;
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
@@ -70,18 +69,18 @@ public class ELM327Adapter {
         }
 
         BluetoothDevice device = bluetoothAdapter.getRemoteDevice(adapterAddress);
-        try {
-            socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            socket.connect();
-        } catch (IOException | SecurityException first) {
-            // Many ELM327 clones only accept the insecure channel.
-            closeQuietly();
+        if (useInsecure != null) {
+            // Asleep adapters take ~5 s to time out per attempt; once one channel has
+            // worked, don't double every retry by also trying the other.
+            openSocket(device, useInsecure);
+        } else {
             try {
-                socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
-                socket.connect();
-            } catch (SecurityException se) {
-                closeQuietly();
-                throw new IOException("Bluetooth permission denied", se);
+                openSocket(device, false);
+                useInsecure = false;
+            } catch (IOException first) {
+                // Many ELM327 clones only accept the insecure channel.
+                openSocket(device, true);
+                useInsecure = true;
             }
         }
 
@@ -104,6 +103,21 @@ public class ELM327Adapter {
             throw e;
         }
         return true;
+    }
+
+    private void openSocket(BluetoothDevice device, boolean insecure) throws IOException {
+        try {
+            socket = insecure
+                    ? device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                    : device.createRfcommSocketToServiceRecord(SPP_UUID);
+            socket.connect();
+        } catch (IOException e) {
+            closeQuietly();
+            throw e;
+        } catch (SecurityException se) {
+            closeQuietly();
+            throw new IOException("Bluetooth permission denied", se);
+        }
     }
 
     public synchronized void disconnect() {
@@ -141,6 +155,31 @@ public class ELM327Adapter {
         } catch (IOException e) {
             return "unknown";
         }
+    }
+
+    /** Adapter's own ID string (e.g. "ELM327 v1.5" or "STN1155 v4.x"). Works with the key off. */
+    public synchronized String identify() throws IOException {
+        return clean(command("ATI", AT_TIMEOUT_MS));
+    }
+
+    /** Voltage at the OBD port as the adapter measures it (e.g. "12.6V"). Works with the key off. */
+    public synchronized String readVoltage() throws IOException {
+        return clean(command("ATRV", AT_TIMEOUT_MS));
+    }
+
+    /** OBD-port voltage in volts from ATRV, or 0 when the adapter's answer isn't a number. */
+    public synchronized double readVolts() throws IOException {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+(\\.\\d+)?)").matcher(readVoltage());
+        return m.find() ? Double.parseDouble(m.group(1)) : 0;
+    }
+
+    /** Raw reply to a trouble-code request (Mode 03/07/0A); parse with DTCReader. */
+    public synchronized String readTroubleCodesRaw(DTCReader.Mode mode) throws IOException {
+        return command(mode.request, PID_TIMEOUT_MS);
+    }
+
+    private static String clean(String reply) {
+        return reply.replace(">", "").replaceAll("\\s+", " ").trim();
     }
 
     /**
@@ -210,10 +249,6 @@ public class ELM327Adapter {
         return data;
     }
 
-    /** Voltage at the OBD port as the adapter measures it (ATRV); nothing is sent to the truck. */
-    public synchronized double readBatteryVolts() throws IOException {
-        return parseVolts(command("ATRV", AT_TIMEOUT_MS));
-    }
 
     /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
     public synchronized String lastEnhancedReply() {
@@ -234,12 +269,6 @@ public class ELM327Adapter {
     static double decodeFordIprPercent(int[] data) {
         if (data == null || data.length < 1) return Double.NaN;
         return data[0] * 100.0 / 255.0;
-    }
-
-    /** "12.6V" → 12.6; NaN when the reply has no voltage in it. */
-    static double parseVolts(String reply) {
-        Matcher m = VOLTS.matcher(reply == null ? "" : reply);
-        return m.find() ? Double.parseDouble(m.group(1)) : Double.NaN;
     }
 
     static int[] parseMode01(String response, int pid) {

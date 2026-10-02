@@ -14,8 +14,8 @@ public final class EngineWatch {
 
     public enum Event { CRANK_STARTED, STARTED, NO_START, STALLED }
 
-    // Starter speed stays well under this; a running 7.3L idles well above it.
-    static final double RUNNING_RPM = 400;
+    // Cranking stays well under this and idle sits above it, so crossing it means the engine started.
+    public static final double RUNNING_RPM = 500;
     // RPM 0 must hold this long with the PCM still answering before it counts as a stall,
     // so the moment between the engine stopping and the PCM going quiet at key-off isn't one.
     static final long STALL_CONFIRM_MS = 3_000L;

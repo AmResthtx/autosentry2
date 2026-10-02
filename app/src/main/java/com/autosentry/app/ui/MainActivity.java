@@ -1,5 +1,6 @@
 package com.autosentry.app.ui;
 
+import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -8,6 +9,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,6 +22,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,6 +32,7 @@ import androidx.core.content.ContextCompat;
 import com.autosentry.app.BuildConfig;
 import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
+import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
@@ -63,7 +67,10 @@ public class MainActivity extends AppCompatActivity {
     private static final long REFRESH_INTERVAL_MS = 500L;
     private static final long DB_REFRESH_INTERVAL_MS = 1500L;
     private static final int TAB_DASHBOARD = 0;
+    private static final int TAB_DIAGNOSTICS = 1;
     private static final int TAB_HISTORY = 2;
+    private static final int KOEO_REPORTS_SHOWN = 5;
+    private static final String STOP_CONFIRM_WORD = "STOP";
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -80,10 +87,12 @@ public class MainActivity extends AppCompatActivity {
     private GridLayout gridTiles;
     private View[] tabViews;
     private Button[] tabButtons;
-    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
+    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList,
+            textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonSaveTrips;
+            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
+            buttonSaveTrips;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,6 +122,9 @@ public class MainActivity extends AppCompatActivity {
         buttonBackgroundAccess = findViewById(R.id.buttonBackgroundAccess);
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
         buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
+        buttonTestConnection = findViewById(R.id.buttonTestConnection);
+        buttonKoeoCheck = findViewById(R.id.buttonKoeoCheck);
+        textKoeoReports = findViewById(R.id.textKoeoReports);
         buttonSaveTrips = findViewById(R.id.buttonSaveTrips);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
@@ -136,6 +148,8 @@ public class MainActivity extends AppCompatActivity {
         buttonBackgroundAccess.setOnClickListener(v -> requestBackgroundAccess());
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
+        buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
+        buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
         buttonSaveTrips.setOnClickListener(v -> saveTripsToTablet());
 
         rebuildTiles();
@@ -182,10 +196,7 @@ public class MainActivity extends AppCompatActivity {
      * itself waits for the truck to be running before it records anything.
      */
     private void maybeAutoStartTracking() {
-        if (TrackingService.isRunning) return;
-        if (!AppSettings.hasObdAdapterConfigured(this) || !AppSettings.isAutoTrackingEnabled(this)) return;
-        if (!PermissionFlow.hasRequiredPermissions(this)) return;
-        startTrackingService();
+        TrackingService.startIfEnabled(this, "app opened");
     }
 
     private void startTrackingService() {
@@ -208,7 +219,7 @@ public class MainActivity extends AppCompatActivity {
     /** Start/stop by hand. Without a paired adapter this opens pairing instead. */
     private void toggleTracking() {
         if (TrackingService.isRunning) {
-            stopService(new Intent(this, TrackingService.class));
+            confirmStopTracking();
             return;
         }
         if (!AppSettings.hasObdAdapterConfigured(this)) {
@@ -216,14 +227,42 @@ public class MainActivity extends AppCompatActivity {
             pickObdAdapter();
             return;
         }
+        AppSettings.setTrackingPaused(this, false);
         withRequiredPermissions(this::startTrackingService);
+    }
+
+    /** Stopping by hand needs the confirm word typed, so a stray tap can't end the session. */
+    private void confirmStopTracking() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        input.setHint(STOP_CONFIRM_WORD);
+        FrameLayout container = new FrameLayout(this);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        container.setPadding(pad, 0, pad, 0);
+        container.addView(input);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Stop tracking the truck?")
+                .setMessage("Tracking stays off — even at key-on — until you tap Start Tracking. "
+                        + "Type " + STOP_CONFIRM_WORD + " to confirm.")
+                .setView(container)
+                .setPositiveButton("Stop Tracking", (dialog, which) -> {
+                    if (!STOP_CONFIRM_WORD.equalsIgnoreCase(input.getText().toString().trim())) {
+                        Toast.makeText(this, "Still tracking — type " + STOP_CONFIRM_WORD + " to stop", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    AppSettings.setTrackingPaused(this, true);
+                    stopService(new Intent(this, TrackingService.class));
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     /**
      * One-time setup: lists already-paired Bluetooth devices and lets the
-     * user tap which one is the ELM327/OBDLink adapter. After this, walking
-     * up to the truck is the only "action" needed — BluetoothConnectionReceiver
-     * takes it from here automatically.
+     * user tap which one is the ELM327/OBDLink adapter. After this, turning
+     * the key is the only "action" needed — TrackingService keeps retrying the
+     * adapter and picks the trip up automatically.
      */
     private void pickObdAdapter() {
         if (!PermissionFlow.hasRequiredPermissions(this)) {
@@ -277,6 +316,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     AppSettings.setObdAdapter(this, chosen.getAddress(), name);
                     AppSettings.setAutoTrackingEnabled(this, true);
+                    AppSettings.setTrackingPaused(this, false);
                     Toast.makeText(this, "Paired: " + name + ". Tracking will now start automatically when it connects.", Toast.LENGTH_LONG).show();
                     refreshAdapterStatusUi();
                     // Restart so a running session switches over to the newly chosen adapter.
@@ -291,6 +331,78 @@ public class MainActivity extends AppCompatActivity {
         boolean newState = !AppSettings.isAutoTrackingEnabled(this);
         AppSettings.setAutoTrackingEnabled(this, newState);
         refreshAdapterStatusUi();
+        if (newState) maybeAutoStartTracking();
+    }
+
+    /**
+     * Step-by-step check of everything a tracked trip depends on. The service runs it
+     * (it owns the adapter link), and this dialog shows the report as it fills in.
+     */
+    private void showConnectionTest() {
+        showServiceReport("OBD connection test", TrackingService.ACTION_RUN_TEST,
+                "Testing… (up to 30 s if the adapter is asleep)");
+    }
+
+    /** Key on, engine off: battery, readings and trouble codes now; the next crank gets timed. */
+    private void showKoeoCheck() {
+        showServiceReport("Key-on engine-off check", TrackingService.ACTION_RUN_KOEO,
+                "Reading the truck… keep the key ON, engine off");
+        lastDbRefresh = 0;
+    }
+
+    /** Runs {@code action} in the service and shows its LiveReadings.testReport as it fills in. */
+    private void showServiceReport(String title, String action, String waitingText) {
+        if (!AppSettings.hasObdAdapterConfigured(this)) {
+            Toast.makeText(this, "Pair your OBD adapter first", Toast.LENGTH_SHORT).show();
+            pickObdAdapter();
+            return;
+        }
+        TextView report = new TextView(this);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        report.setPadding(pad, pad / 2, pad, 0);
+        report.setTextSize(15);
+        report.setTextIsSelectable(true);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(report);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(scroll)
+                .setNeutralButton("Run Again", null)
+                .setPositiveButton("Close", null)
+                .create();
+        Runnable update = new Runnable() {
+            @Override
+            public void run() {
+                report.setText(LiveReadings.testReport);
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setEnabled(!LiveReadings.testRunning);
+                uiHandler.postDelayed(this, REFRESH_INTERVAL_MS);
+            }
+        };
+        dialog.setOnShowListener(d -> {
+            // Set here so tapping it doesn't close the dialog.
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> startServiceReport(action, waitingText));
+            uiHandler.post(update);
+        });
+        dialog.setOnDismissListener(d -> {
+            uiHandler.removeCallbacks(update);
+            lastDbRefresh = 0; // show a new KOEO report on the Diagnostics tab right away
+        });
+        startServiceReport(action, waitingText);
+        dialog.show();
+    }
+
+    private void startServiceReport(String action, String waitingText) {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = waitingText;
+        AppSettings.setTrackingPaused(this, false);
+        try {
+            ContextCompat.startForegroundService(this, new Intent(this, TrackingService.class)
+                    .setAction(action));
+        } catch (RuntimeException e) {
+            LiveReadings.testRunning = false;
+            LiveReadings.testReport = "✗ Couldn't start tracking: " + e.getMessage();
+        }
     }
 
     private void refreshAdapterStatusUi() {
@@ -306,16 +418,28 @@ public class MainActivity extends AppCompatActivity {
         }
         PowerManager pm = getSystemService(PowerManager.class);
         boolean allowed = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
-        buttonBackgroundAccess.setText(allowed
-                ? "Background start: Allowed"
-                : "Allow background start (needed for auto-start)");
+        buttonBackgroundAccess.setText(!allowed ? "Allow background start (needed for auto-start)"
+                : !exactAlarmsAllowed() ? "Allow low-power waiting (alarms)"
+                : "Background start: Allowed");
+    }
+
+    /** Exact alarms let tracking sleep while the truck is off and still check for key-on every 15 s. */
+    private boolean exactAlarmsAllowed() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        return alarms != null && alarms.canScheduleExactAlarms();
     }
 
     /** Android only lets an app start tracking from a closed state if the user exempts it from battery optimization. */
     private void requestBackgroundAccess() {
         PowerManager pm = getSystemService(PowerManager.class);
         if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
-            Toast.makeText(this, "Already allowed", Toast.LENGTH_SHORT).show();
+            if (exactAlarmsAllowed()) {
+                Toast.makeText(this, "Already allowed", Toast.LENGTH_SHORT).show();
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                        Uri.parse("package:" + getPackageName())));
+            }
             return;
         }
         try {
@@ -518,44 +642,35 @@ public class MainActivity extends AppCompatActivity {
 
         if (!any) {
             TextView hint = new TextView(this);
-            hint.setText("No readings selected — tap Edit Dashboard to pick some.");
+            hint.setText("No readings selected — tap Choose Readings (PIDs) to pick some.");
             gridTiles.addView(hint);
         }
     }
 
-    /** Lets the user pick which readings appear on the dashboard. */
+    /**
+     * Lets the user pick which readings (PIDs) are read and shown. Every reading is
+     * offered; ones the truck hasn't confirmed are labeled so, and their tile says
+     * "Not supported" if the truck never answers them.
+     */
     private void showEditDashboard() {
         Set<Integer> supported = !LiveReadings.supported.isEmpty()
                 ? LiveReadings.supported : AppSettings.getSupportedPids(this);
-        if (supported.isEmpty()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Connect to the truck first")
-                    .setMessage("AutoSentry doesn't know yet which readings this truck reports. "
-                            + "Start tracking with the engine running once, then come back here — "
-                            + "you'll still be able to pick the computed ones (MPG, distance, odometer) now.")
-                    .setPositiveButton("Pick computed readings", (d, w) -> showEditDashboardOptions(supported))
-                    .setNegativeButton("Cancel", null)
-                    .show();
-            return;
-        }
-        showEditDashboardOptions(supported);
-    }
-
-    private void showEditDashboardOptions(Set<Integer> supported) {
-        List<PidCatalog.Pid> options = PidCatalog.available(supported);
+        List<PidCatalog.Pid> options = new ArrayList<>(PidCatalog.all());
         List<Integer> current = AppSettings.getDashboardPids(this);
 
         String[] labels = new String[options.size()];
         boolean[] checked = new boolean[options.size()];
         for (int i = 0; i < options.size(); i++) {
-            labels[i] = options.get(i).label();
-            checked[i] = current.contains(options.get(i).id);
+            PidCatalog.Pid pid = options.get(i);
+            String note = "";
+            if (!pid.computed && supported.isEmpty()) note = "  — not checked on the truck yet";
+            else if (!pid.computed && !supported.contains(pid.id)) note = "  — truck didn't answer";
+            labels[i] = pid.label() + note;
+            checked[i] = current.contains(pid.id);
         }
 
         new AlertDialog.Builder(this)
-                .setTitle(supported.isEmpty()
-                        ? "Choose readings (connect to the truck to see which it supports)"
-                        : "Choose readings to show")
+                .setTitle("Choose readings (PIDs) to track")
                 .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Save", (dialog, which) -> {
                     List<Integer> chosen = new ArrayList<>();
@@ -578,6 +693,7 @@ public class MainActivity extends AppCompatActivity {
     /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
         final boolean needServiceList = currentTab == TAB_HISTORY;
+        final boolean needKoeo = currentTab == TAB_DIAGNOSTICS;
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             if (profile == null) return;
@@ -597,6 +713,19 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            StringBuilder koeoSb = new StringBuilder();
+            if (needKoeo) {
+                for (KoeoReport report : db.koeoReportDao().latest(KOEO_REPORTS_SHOWN)) {
+                    if (koeoSb.length() > 0) koeoSb.append("\n\n");
+                    koeoSb.append(report.summary());
+                }
+                if (koeoSb.length() == 0) {
+                    koeoSb.append("No key-on checks yet. One is taken automatically each time the key is "
+                            + "turned ON before cranking, or tap Run Key-On Check with the key ON, engine off.");
+                }
+            }
+            final String koeoText = koeoSb.toString();
+
             uiHandler.post(() -> {
                 textOilLife.setText(String.format(Locale.US, "Oil life: %.0f%%", profile.oilLifePercent));
                 textOdometer.setText(profile.odometerMiles > 0
@@ -606,6 +735,7 @@ public class MainActivity extends AppCompatActivity {
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));
                 if (needServiceList) textServiceList.setText(sb.toString());
+                if (needKoeo) textKoeoReports.setText(koeoText);
             });
         });
     }

@@ -121,7 +121,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="Edit Dashboard" />
+                    android:text="Choose Readings (PIDs)" />
 
                 <Button
                     android:id="@+id/buttonToggleTracking"
@@ -150,7 +150,7 @@
                     android:layout_height="wrap_content"
                     android:textSize="18sp"
                     android:textStyle="bold"
-                    android:text="No scans yet" />
+                    android:text="Key-on checks (KOEO)" />
 
                 <TextView
                     android:layout_width="match_parent"
@@ -158,7 +158,24 @@
                     android:layout_marginTop="4dp"
                     android:textSize="14sp"
                     android:textColor="#757575"
-                    android:text="Scan results will appear here after the truck has been scanned." />
+                    android:text="Battery, readings and trouble codes at key-on before cranking, then how the crank went." />
+
+                <Button
+                    android:id="@+id/buttonKoeoCheck"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Run Key-On Check (key ON, engine off)" />
+
+                <TextView
+                    android:id="@+id/textKoeoReports"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textSize="15sp"
+                    android:lineSpacingMultiplier="1.15"
+                    android:textIsSelectable="true"
+                    android:text="Loading…" />
             </LinearLayout>
         </ScrollView>
 
@@ -301,6 +318,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Pair OBD Adapter" />
+
+                <Button
+                    android:id="@+id/buttonTestConnection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Test OBD Connection" />
 
                 <Button
                     android:id="@+id/buttonAutoTrackingToggle"

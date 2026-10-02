@@ -2,7 +2,7 @@
 
 AutoSentry turns a phone or tablet and a Bluetooth OBD-II adapter into a vehicle-aware diagnostic monitor, a mileage-and-hours-based maintenance tracker, and a real-time trip computer — built first for a 2000 Ford F-250 7.3L Power Stroke, but designed to support other vehicles through configurable PID profiles.
 
-The whole point is zero change to the driver's habits. Pair the OBD adapter once. The adapter remains asleep while the truck is off, wakes when the key is turned to the **ON** position, and drops its connection when the truck shuts off. AutoSentry reacts to that connection automatically, so the driver does not have to remember to open the app or start a trip. This captures the key-on and cranking period that a manual app workflow can miss.
+The whole point is zero change to the driver's habits. Pair the OBD adapter once. The adapter remains asleep while the truck is off, wakes when the key is turned to the **ON** position, and drops its connection when the truck shuts off. An adapter never opens the Bluetooth link itself, so AutoSentry keeps a background monitor running that retries the adapter every few seconds; the trip is picked up within seconds of key-on whether or not anyone opens the app or touches the tablet.
 
 ## What it does today
 
@@ -11,7 +11,10 @@ The whole point is zero change to the driver's habits. Pair the OBD adapter once
 - **Oil life that actually moves** — degrades in real time from accumulated mileage against the 7.3L service schedule (3,000 mi severe / 5,000 mi normal), with engine hours, idling, and engine oil temperature used to identify additional severe-duty conditions. The app treats mileage and engine hours as separate usage measurements; it does not invent an unsupported factory engine-hour interval.
 - **Service reminders** — oil and filter, fuel filter, air filter, transmission service, transfer case, front/rear differential, coolant service, lubrication, inspections, and common age- or mileage-based wear items can be tracked. Notifications identify approaching, due, and overdue service.
 - **GPS-based trip computer** — speed, distance, and real-time MPG computed from MAF airflow and GPS speed. Every automatically detected trip is logged with distance, fuel used, and average MPG.
-- **Automatic key-on tracking** — the adapter is expected to be asleep with the truck off. When the key reaches ON and the adapter wakes, the manifest-registered Bluetooth receiver starts the foreground monitor even if the app was not open. When the truck shuts off and the adapter disconnects, the trip is closed.
+- **Automatic key-on tracking** — full-power monitoring (CPU awake, 4 polls a second, GPS, 1-second reconnects) runs only while the engine is turning and a trip is open. With the truck off the monitor drops to low power: adapter link closed so it can sleep, no GPS, no wake lock, and an exact alarm wakes the tablet every 15 seconds for one quick key-on check (unlocking the tablet or plugging in power checks at once). A trip starts within seconds of key-on even if the app was never opened. It restarts itself after a reboot, an app update, or a system kill (15-minute watchdog). A dropped link mid-drive is retried immediately and the gap is filled from GPS when location is allowed; the trip closes once the truck has been off (or the adapter silent) for 2 minutes. Only typing STOP or turning auto-tracking off keeps it down.
+- **Connection test** — Account > Test OBD Connection checks background-start permission, location, Bluetooth, the adapter link, adapter ID, OBD-port voltage, whether the truck computer answers, and live RPM/speed/oil temp, and says which step failed.
+- **Key-on check (KOEO)** — every key cycle, before cranking, AutoSentry snapshots battery voltage at the OBD port, every standard reading the truck answers (plus the 7.3L's Ford oil temp), and stored and pending trouble codes. It then times the crank (RPM above 0 but under 500), counts tries, and records the lowest cranking voltage and whether the engine started. Reports are on the Diagnostics tab; **Run Key-On Check** takes one on demand with the key ON and the engine off. Ford's commanded self-tests (on-demand KOEO self-test, injector buzz test, glow plug test) are not sent: their 7.3L request bytes aren't verified here, and the buzz test energizes injectors.
+- **Pick your readings** — Dashboard > Choose Readings (PIDs) lists every supported reading; ones the truck hasn't confirmed are labeled instead of hidden.
 - **Honest data status** — connection loss, missing PID responses, stale readings, unsupported vehicle data, and degraded monitoring are surfaced to the user. AutoSentry does not silently present simulator data as real vehicle data.
 - **Maintenance history with evidence** — users enter maintenance they performed and may attach receipts, parts photos, or installation photos. Records are labeled according to their evidence rather than being treated as verified merely because the user entered them.
 - **On-device debug log** — crashes and errors are written to a local log that can be viewed and shared from the app.
@@ -84,7 +87,9 @@ maintenance/    ServiceInterval, ServiceStatus, MaintenanceScheduleEngine
 fuel/           MpgCalculator — MAF + GPS speed -> instantaneous/interval MPG
 gps/            GpsTracker — LocationManager wrapper, no Play Services dependency
 service/        TrackingService — foreground OBD + GPS persistence and notifications
-receiver/       BluetoothConnectionReceiver — automatic start/stop on adapter state
+service/        TrackingWatchdogWorker — restarts tracking if the system killed it
+receiver/       BluetoothConnectionReceiver, BootReceiver — restart tracking on adapter
+                connect, reboot, and app update
 data/           Room entities/DAOs for PIDs, sessions, trip points, vehicle profile,
                 maintenance events, and photo attachments
 ui/             MainActivity, DebugLogActivity, LogMaintenanceActivity,
@@ -106,7 +111,7 @@ The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). C
 ## Planned directions
 
 - Configurable PID catalog with vehicle-specific defaults and user-selected signals.
-- KOEO capture and crank/no-start reports based on the values the truck actually returns.
+- Ford commanded KOEO tests (on-demand self-test, injector buzz, glow plug) once their 7.3L requests are verified on the truck.
 - PID availability, stale-data, and drift detection with evidence-backed notifications.
 - Receipt capture and clearer maintenance evidence states.
 - Vehicle-specific maintenance profiles for additional makes, models, engines, and drivetrains.

@@ -1,9 +1,7 @@
 package com.autosentry.app.obd;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -12,7 +10,7 @@ import java.util.Map;
  * the app from those readings. Values come out in US display units.
  *
  * Which standard PIDs a given truck actually answers is discovered at connect
- * time (see ELM327Adapter.readSupportedPids) and the editor only offers those.
+ * time (see ELM327Adapter.readSupportedPids); the editor labels the rest.
  */
 public final class PidCatalog {
     public static final int RPM = 0x0C;
@@ -126,19 +124,5 @@ public final class PidCatalog {
 
     public static Collection<Pid> all() {
         return ALL.values();
-    }
-
-    /**
-     * What the editor should offer: computed items always, plus standard ones
-     * the truck has actually answered. Before the first successful scan
-     * {@code supported} is empty, so only the computed items are offered —
-     * offering unconfirmed PIDs just leads to tiles stuck on "--" forever.
-     */
-    public static List<Pid> available(java.util.Set<Integer> supported) {
-        List<Pid> result = new ArrayList<>();
-        for (Pid pid : ALL.values()) {
-            if (pid.computed || supported.contains(pid.id)) result.add(pid);
-        }
-        return result;
     }
 }

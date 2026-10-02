@@ -20,12 +20,4 @@ public class ELM327AdapterTest {
         assertEquals(100.0, ELM327Adapter.decodeFordIprPercent(data), 1e-9);
         assertTrue(Double.isNaN(ELM327Adapter.decodeFordIprPercent(ELM327Adapter.parseReply("NO DATA\r>", "621434"))));
     }
-
-    @Test
-    public void voltsFromAtrv() {
-        assertEquals(12.6, ELM327Adapter.parseVolts("12.6V\r\r>"), 1e-9);
-        assertEquals(9.8, ELM327Adapter.parseVolts("ATRV\r9.8 V\r>"), 1e-9);
-        assertTrue(Double.isNaN(ELM327Adapter.parseVolts("?\r>")));
-        assertTrue(Double.isNaN(ELM327Adapter.parseVolts(null)));
-    }
 }

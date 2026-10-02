@@ -2,16 +2,22 @@ package com.autosentry.app.obd;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * DTC (Diagnostic Trouble Code) reader — parses Mode 03 (stored),
- * Mode 07 (pending), Mode 0A (permanent) codes from ELM327 responses.
+ * Trouble codes from Mode 03 (stored), 07 (pending) and 0A (permanent)
+ * replies, with descriptions for common 7.3L Power Stroke codes.
  *
- * 7.3L Powerstroke common codes handled with descriptions.
+ * Replies arrive with spaces and headers off (see ELM327Adapter). On J1850
+ * (the 7.3L) each "43" line carries three 2-byte codes padded with 0000; on
+ * CAN the first byte after "43" is a code count and long replies come as
+ * numbered "0:", "1:" segments.
  */
-public class DTCReader {
+public final class DTCReader {
     // 7.3L Powerstroke common DTC descriptions (subset)
     private static final Map<String, String> DTC_MAP = new HashMap<>();
     static {
@@ -34,102 +40,64 @@ public class DTCReader {
     }
 
     public enum Mode {
-        STORED_03, PENDING_07, PERMANENT_0A
-    }
+        STORED_03("03"), PENDING_07("07"), PERMANENT_0A("0A");
 
-    public static class DTCRecord {
-        public final String code;       // e.g. "P0236"
-        public final String description; // Human-readable
-        public final Mode mode;         // Where it was found
-        public DTCRecord(String code, String description, Mode mode) {
-            this.code = code;
-            this.description = description;
-            this.mode = mode;
+        public final String request;
+
+        Mode(String request) {
+            this.request = request;
+        }
+
+        String replyHeader() {
+            return String.format(Locale.US, "%02X", Integer.parseInt(request, 16) + 0x40);
         }
     }
 
-    /**
-     * Parse ELM327 response string for stored codes (Mode 03).
-     * Response format for stored codes: "43 01 00 00 ... >" (count + 2-byte codes)
-     * Example: 43 = 4 bytes = count (01) + 2 P-codes (each 2 bytes) + padding
-     */
-    public List<DTCRecord> parseStoredCodes(String response) throws Exception {
-        return parseCodes(response, Mode.STORED_03);
-    }
+    private DTCReader() {}
 
-    /**
-     * Parse pending codes (Mode 07).
-     */
-    public List<DTCRecord> parsePendingCodes(String response) throws Exception {
-        return parseCodes(response, Mode.PENDING_07);
-    }
-
-    /**
-     * Parse permanent codes (Mode 0A) — emissions-related, only cleared by repair.
-     */
-    public List<DTCRecord> parsePermanentCodes(String response) throws Exception {
-        return parseCodes(response, Mode.PERMANENT_0A);
-    }
-
-    private List<DTCRecord> parseCodes(String response, Mode mode) throws Exception {
-        List<DTCRecord> codes = new ArrayList<>();
-        // Clean response: remove prompts, headers, whitespace
-        String clean = response.replace(">", "").trim();
-        // Split by lines; find the line that starts with the response header for the mode
-        // Mode headers:
-        // 03 -> 43 (stored)
-        // 07 -> 47 (pending)
-        // 0A -> 4A? Actually Mode 0A response is typically different; using generic parsing
-        String[] lines = clean.split("\\r?\\n");
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) continue;
-            // Look for P-codes embedded in hex response
-            // A code like P0236 = hex 0236 = bytes 02 36
-            // We scan for hex pairs and try to decode
-            String[] tokens = trimmed.split("\\s+");
-            for (String token : tokens) {
-                // Skip mode response headers (43, 47, 4A) and single bytes that aren't pairs
-                if (token.equals("43") || token.equals("47") || token.equals("4A")) continue;
-                if (token.length() == 4 && token.matches("[0-9A-Fa-f]{4}")) {
-                    String code = decodePCode(token);
-                    if (code != null && !code.isEmpty()) {
-                        codes.add(new DTCRecord(code, DTC_MAP.getOrDefault(code, "Unknown code — check OBD-II database"), mode));
-                    }
-                }
+    /** Codes in the reply, without duplicates (several modules can answer). Empty when none. */
+    public static List<String> parse(String response, Mode mode, boolean canFormat) {
+        Set<String> codes = new LinkedHashSet<>();
+        if (response == null) return new ArrayList<>(codes);
+        String header = mode.replyHeader();
+        StringBuilder segments = new StringBuilder();
+        for (String rawLine : response.split("[\\r\\n]+")) {
+            String line = rawLine.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
+            if (line.matches("[0-9A-F]:[0-9A-F]*")) {
+                segments.append(line.substring(2)); // CAN multi-frame piece
+            } else if (line.startsWith(header) && line.matches("[0-9A-F]+")) {
+                addCodes(line.substring(header.length()), canFormat, codes);
             }
         }
-        return codes;
+        if (segments.length() > 0 && segments.indexOf(header) == 0) {
+            addCodes(segments.substring(header.length()), canFormat, codes);
+        }
+        return new ArrayList<>(codes);
     }
 
-    /**
-     * Decode hex pair to P-code.
-     * Example: hex "0236" -> "P0236" (P0xxx format)
-     */
-    private String decodePCode(String hex) {
-        // Hex format: 2-byte code. First nibble indicates P/U/B/C, second indicates category.
-        // We assume P-codes (Powertrain) for simplicity; real decoder would handle U/B/C categories.
-        try {
-            int value = Integer.parseInt(hex, 16);
-            // Decode: first nibble indicates letter, next 3 indicate number
-            // Simplified: treat as P-codes for 7.3L diagnostics
-            int category = (value >> 12) & 0xF;
-            int number = value & 0xFFF;
-            char letter = 'P';
-            switch (category) {
-                case 0: letter = 'P'; break; // Powertrain
-                case 1: letter = 'B'; break; // Body
-                case 2: letter = 'C'; break; // Chassis
-                case 3: letter = 'U'; break; // Network
-                default: letter = 'P';
-            }
-            return String.format("%c%04d", letter, number);
-        } catch (Exception e) {
-            return null;
+    private static void addCodes(String hex, boolean canFormat, Set<String> out) {
+        int start = canFormat ? 2 : 0; // CAN: skip the code-count byte
+        for (int i = start; i + 4 <= hex.length(); i += 4) {
+            int b0 = Integer.parseInt(hex.substring(i, i + 2), 16);
+            int b1 = Integer.parseInt(hex.substring(i + 2, i + 4), 16);
+            if (b0 == 0 && b1 == 0) continue; // padding
+            out.add(decode(b0, b1));
         }
     }
 
-    public String getCommonCodeDescriptions() {
+    /** SAE J2012: top 2 bits pick P/C/B/U, next 2 the first digit, then three hex digits. */
+    static String decode(int b0, int b1) {
+        char letter = "PCBU".charAt((b0 >> 6) & 3);
+        return String.format(Locale.US, "%c%d%X%X%X", letter, (b0 >> 4) & 3, b0 & 0xF, (b1 >> 4) & 0xF, b1 & 0xF);
+    }
+
+    /** "P0470 (Exhaust Back Pressure (EBP) Sensor Malfunction)", or just the code when not in the table. */
+    public static String describe(String code) {
+        String text = DTC_MAP.get(code);
+        return text != null ? code + " (" + text + ")" : code;
+    }
+
+    public static String getCommonCodeDescriptions() {
         StringBuilder sb = new StringBuilder();
         sb.append("7.3L Powerstroke Common DTCs:\n");
         for (String code : DTC_MAP.keySet()) {

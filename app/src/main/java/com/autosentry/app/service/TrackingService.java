@@ -24,6 +24,7 @@ import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.data.AppDatabase;
+import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
@@ -34,6 +35,7 @@ import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
 import com.autosentry.app.maintenance.ServiceItemType;
 import com.autosentry.app.maintenance.ServiceStatus;
 import com.autosentry.app.notifications.NotificationUtils;
+import com.autosentry.app.obd.DTCReader;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
@@ -83,6 +85,8 @@ public class TrackingService extends Service {
 
     /** Runs the step-by-step adapter check (see runConnectionTest) on the poll thread. */
     public static final String ACTION_RUN_TEST = "com.autosentry.app.RUN_CONNECTION_TEST";
+    /** Takes a key-on-engine-off snapshot now (key ON, engine off); report goes to LiveReadings.testReport. */
+    public static final String ACTION_RUN_KOEO = "com.autosentry.app.RUN_KOEO_CHECK";
     private static final String ACTION_IDLE_CHECK = "com.autosentry.app.IDLE_CHECK";
 
     private static final long POLL_INTERVAL_MS = 250L;
@@ -100,6 +104,8 @@ public class TrackingService extends Service {
     private static final long OIL_PROBE_RETRY_MS = 30_000L;
     // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
     private static final long OIL_READ_INTERVAL_MS = 2_000L;
+    // Cranking stays well under this and idle sits above it, so crossing it means the engine started.
+    private static final double STARTED_RPM = 500.0;
     // GPS below this is parked jitter, not driving.
     private static final double GPS_MOVING_MPH = 3.0;
 
@@ -119,6 +125,11 @@ public class TrackingService extends Service {
     // True when the truck answers Ford's enhanced oil-temp PID (7.3L) instead of the standard one.
     private boolean fordOilTemp = false;
     private boolean pwmBus = false;
+    private boolean canBus = false;
+    // This key cycle's KOEO report: captured before cranking, saved again when the crank ends.
+    private KoeoReport koeo;
+    private boolean koeoDue = false;
+    private long crankStart = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
     // Avoids re-notifying every tick once an item crosses 80%; cleared
@@ -208,10 +219,12 @@ public class TrackingService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         boolean runTest = intent != null && ACTION_RUN_TEST.equals(intent.getAction());
+        boolean runKoeo = intent != null && ACTION_RUN_KOEO.equals(intent.getAction());
         if (started) {
             // Already running; a second start must not spawn a second poll loop.
             if (runTest) queueConnectionTest();
-            if (runTest || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
+            if (runKoeo) queueKoeoCheck();
+            if (runTest || runKoeo || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
             return START_STICKY;
         }
         started = true;
@@ -226,13 +239,13 @@ public class TrackingService extends Service {
             // Android refused the foreground service (missing permission or background start).
             AppLog.e(this, TAG, "Could not start foreground service", e);
             stopReason = "Couldn't start tracking: " + e.getMessage();
-            if (runTest) endTestEarly("✗ " + stopReason);
+            if (runTest || runKoeo) endTestEarly("✗ " + stopReason);
             stopSelf();
             return START_NOT_STICKY;
         }
         if (adapterAddress == null || adapterAddress.isEmpty()) {
             stopReason = "No OBD adapter paired — tap Pair OBD Adapter in Account";
-            if (runTest) endTestEarly("✗ No OBD adapter paired — tap Pair OBD Adapter first.");
+            if (runTest || runKoeo) endTestEarly("✗ No OBD adapter paired — tap Pair OBD Adapter first.");
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -242,6 +255,7 @@ public class TrackingService extends Service {
 
         ioExecutor.execute(this::initState);
         if (runTest) queueConnectionTest();
+        if (runKoeo) queueKoeoCheck();
         return START_STICKY;
     }
 
@@ -367,6 +381,7 @@ public class TrackingService extends Service {
      * release the wake lock, and let an exact alarm wake the tablet for the next check.
      */
     private void waitForKeyOn() {
+        finishKoeo(); // key cycle over: keep whatever the crank showed (or that it never cranked)
         if (realAdapter.isConnected()) {
             realAdapter.disconnect();
             supportedPids = Collections.emptySet();
@@ -465,7 +480,10 @@ public class TrackingService extends Service {
         lastConnectedTimestamp = System.currentTimeMillis();
         mainHandler.post(this::startGps);
         String protocol = realAdapter.describeProtocol();
-        pwmBus = protocol.toUpperCase(java.util.Locale.US).contains("PWM");
+        String upper = protocol.toUpperCase(java.util.Locale.US);
+        pwmBus = upper.contains("PWM");
+        canBus = upper.contains("CAN") || upper.contains("15765");
+        if (koeo == null) koeoDue = true; // fresh truck contact: snapshot it if the engine isn't running yet
         probeFordOilTemp();
         AppLog.i(this, TAG, "Truck answered on " + protocol
                 + "; supported PIDs: " + describePids(found)
@@ -597,6 +615,122 @@ public class TrackingService extends Service {
         LiveReadings.testRunning = running;
     }
 
+    /**
+     * KOEO: the first look at the truck in a key cycle, before the engine turns, gets a
+     * snapshot. After that, RPM between 0 and STARTED_RPM is cranking: time it and track
+     * the lowest battery voltage until the engine starts or the crank gives up.
+     */
+    private void trackKeyOnAndCrank(long now, Double rpm, boolean engineRunning) throws IOException {
+        if (koeoDue) {
+            koeoDue = false;
+            if (!engineRunning) captureKoeo(now); // already running = joined mid-drive, nothing to capture
+        }
+        if (koeo == null || koeo.started || rpm == null) return; // no RPM answer this tick: no information
+        if (rpm > 0 && rpm < STARTED_RPM) {
+            if (crankStart == 0) {
+                crankStart = now;
+                koeo.crankAttempts++;
+            }
+            double v = realAdapter.readVolts();
+            if (v > 0 && (koeo.minCrankVolts == 0 || v < koeo.minCrankVolts)) koeo.minCrankVolts = v;
+        } else if (rpm >= STARTED_RPM) {
+            koeo.started = true;
+            if (crankStart != 0) {
+                koeo.crankSeconds = (now - crankStart) / 1000.0;
+            } else if (koeo.crankAttempts == 0) {
+                koeo.crankAttempts = 1; // cranked and caught between two readings
+            }
+            finishKoeo();
+        } else if (crankStart != 0) {
+            koeo.crankSeconds = (now - crankStart) / 1000.0; // RPM fell back to 0: that try didn't start
+            crankStart = 0;
+            db.koeoReportDao().update(koeo);
+        }
+    }
+
+    private void captureKoeo(long now) throws IOException {
+        finishKoeo();
+        KoeoReport r = new KoeoReport();
+        r.timestamp = now;
+        r.keyOnVolts = realAdapter.readVolts();
+        StringBuilder text = new StringBuilder();
+        for (PidCatalog.Pid def : PidCatalog.all()) {
+            if (def.computed || !supportedPids.contains(def.id)) continue;
+            double value = def.decode(realAdapter.readPid(def.id));
+            if (!Double.isNaN(value)) text.append(def.label()).append(": ").append(def.formatValue(value)).append('\n');
+        }
+        if (fordOilTemp) {
+            double c = realAdapter.readFordEngineOilTempC();
+            PidCatalog.Pid oil = PidCatalog.get(PidCatalog.ENGINE_OIL_TEMP);
+            if (!Double.isNaN(c)) text.append(oil.label()).append(": ").append(oil.formatValue(c * 9.0 / 5.0 + 32.0)).append('\n');
+        }
+        r.readings = text.toString().trim();
+        r.storedCodes = readCodes(DTCReader.Mode.STORED_03);
+        r.pendingCodes = readCodes(DTCReader.Mode.PENDING_07);
+        r.id = db.koeoReportDao().insert(r);
+        koeo = r;
+        crankStart = 0;
+        AppLog.i(this, TAG, "Key-on check:\n" + r.summary());
+    }
+
+    /** Comma-separated codes, "" for none, null when the request itself got no reply. */
+    private String readCodes(DTCReader.Mode mode) throws IOException {
+        String raw = realAdapter.readTroubleCodesRaw(mode);
+        if (raw.trim().isEmpty() || !raw.contains(">")) return null; // timed out
+        return android.text.TextUtils.join(",", DTCReader.parse(raw, mode, canBus));
+    }
+
+    /** Saves the open KOEO report as it stands and closes it. */
+    private void finishKoeo() {
+        if (koeo == null) return;
+        db.koeoReportDao().update(koeo);
+        String summary = koeo.summary();
+        AppLog.i(this, TAG, "Key cycle result: " + summary.substring(summary.lastIndexOf("Crank:")));
+        koeo = null;
+        crankStart = 0;
+    }
+
+    private void queueKoeoCheck() {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = "Checking…";
+        try {
+            ioExecutor.execute(this::runKoeoCheck);
+        } catch (RejectedExecutionException e) {
+            endTestEarly("✗ Tracking is shutting down — try again.");
+        }
+    }
+
+    /** On-demand KOEO snapshot from the Diagnostics tab. Needs key ON, engine off. */
+    private void runKoeoCheck() {
+        StringBuilder r = new StringBuilder();
+        try {
+            if (!ensureConnected()) {
+                r.append("✗ Can't reach the adapter (").append(lastConnectError)
+                        .append("). Turn the key to ON and try again.");
+                return;
+            }
+            if (!ensureTruckAnswering()) {
+                r.append("✗ Truck computer not answering. Turn the key to ON (engine off) and try again.");
+                return;
+            }
+            PidCatalog.Pid rpmDef = PidCatalog.get(PidCatalog.RPM);
+            double rpm = supportedPids.contains(PidCatalog.RPM)
+                    ? rpmDef.decode(realAdapter.readPid(PidCatalog.RPM)) : Double.NaN;
+            if (rpm > 0) {
+                r.append("✗ Engine is running. Shut it off, leave the key ON, and run the check again.");
+                return;
+            }
+            koeoDue = false;
+            captureKoeo(System.currentTimeMillis());
+            r.append(koeo.summary()).append("\n\nCrank whenever you're ready — the start is timed and saved.");
+        } catch (IOException | RuntimeException e) {
+            r.append("✗ Adapter stopped answering: ").append(e.getMessage());
+            handleLinkLoss();
+        } finally {
+            publishTest(r, false);
+        }
+    }
+
     private void handleLinkLoss() {
         if (realAdapter != null) realAdapter.disconnect();
         supportedPids = Collections.emptySet();
@@ -645,6 +779,7 @@ public class TrackingService extends Service {
         Double obdSpeed = LiveReadings.values.get(PidCatalog.SPEED);
         // One dropped RPM answer must not pause the trip while the truck is plainly moving.
         boolean engineRunning = (rpm != null && rpm > 0) || (obdSpeed != null && obdSpeed > 0);
+        trackKeyOnAndCrank(now, rpm, engineRunning);
 
         if (!engineRunning) {
             LiveReadings.engineRunning = false;
@@ -856,6 +991,7 @@ public class TrackingService extends Service {
                     activeSession.endTimestamp = System.currentTimeMillis();
                     db.sessionDao().update(activeSession);
                 }
+                finishKoeo();
                 if (profile != null) flushProfile();
             });
         } catch (RejectedExecutionException ignored) {

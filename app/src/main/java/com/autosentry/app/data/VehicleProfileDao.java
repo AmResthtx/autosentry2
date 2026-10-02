@@ -35,6 +35,9 @@ public interface VehicleProfileDao {
     @Query("UPDATE vehicle_profile SET odometerMiles = :miles WHERE id = 1")
     void setOdometer(double miles);
 
+    @Query("UPDATE vehicle_profile SET severeDuty = :severe WHERE id = 1")
+    void setSevereDuty(boolean severe);
+
     @Query("UPDATE vehicle_profile SET oilLifePercent = :oilLifePercent, milesSinceOilChange = :milesSinceChange, "
             + "engineHoursSinceOilChange = 0, lastOilResetTimestamp = :timestamp WHERE id = 1")
     void resetOil(double oilLifePercent, double milesSinceChange, long timestamp);

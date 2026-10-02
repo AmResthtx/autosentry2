@@ -85,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
             textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck;
+            buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -111,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
         buttonLogMaintenance = findViewById(R.id.buttonLogMaintenance);
         buttonMaintenanceHistory = findViewById(R.id.buttonMaintenanceHistory);
         buttonPairAdapter = findViewById(R.id.buttonPairAdapter);
+        buttonSetupWizard = findViewById(R.id.buttonSetupWizard);
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
         buttonBackgroundAccess = findViewById(R.id.buttonBackgroundAccess);
         buttonDebugLog = findViewById(R.id.buttonDebugLog);
@@ -123,7 +124,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (savedInstanceState == null) {
-            PermissionFlow.requestMissingPermissions(this);
+            // A fresh install gets the wizard, which asks for permissions itself, step by step.
+            if (AppSettings.getSetupPhaseDone(this) == 0 && !AppSettings.hasObdAdapterConfigured(this)) {
+                startActivity(new Intent(this, SetupWizardActivity.class));
+            } else {
+                PermissionFlow.requestMissingPermissions(this);
+            }
         }
 
         for (int i = 0; i < tabButtons.length; i++) {
@@ -136,6 +142,7 @@ public class MainActivity extends AppCompatActivity {
         buttonLogMaintenance.setOnClickListener(v -> startActivity(new Intent(this, LogMaintenanceActivity.class)));
         buttonMaintenanceHistory.setOnClickListener(v -> startActivity(new Intent(this, MaintenanceHistoryActivity.class)));
         buttonPairAdapter.setOnClickListener(v -> pickObdAdapter());
+        buttonSetupWizard.setOnClickListener(v -> startActivity(new Intent(this, SetupWizardActivity.class)));
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());
         buttonBackgroundAccess.setOnClickListener(v -> requestBackgroundAccess());
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));

@@ -22,6 +22,8 @@ public final class AppSettings {
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
     // Set once Trip Time has been put on a saved dashboard (or the user saved their own).
     private static final String KEY_TRIP_TIME_ADDED = "trip_time_added";
+    // Highest setup-wizard phase the user has finished (0 = none); see SetupWizardActivity.
+    private static final String KEY_SETUP_PHASE_DONE = "setup_phase_done";
     // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
     private static final int REMOVED_COOLANT_PID = 0x05;
 
@@ -62,6 +64,14 @@ public final class AppSettings {
 
     public static boolean isTrackingPaused(Context context) {
         return prefs(context).getBoolean(KEY_TRACKING_PAUSED, false);
+    }
+
+    public static int getSetupPhaseDone(Context context) {
+        return prefs(context).getInt(KEY_SETUP_PHASE_DONE, 0);
+    }
+
+    public static void setSetupPhaseDone(Context context, int phase) {
+        prefs(context).edit().putInt(KEY_SETUP_PHASE_DONE, phase).apply();
     }
 
     public static List<Integer> getDashboardPids(Context context) {

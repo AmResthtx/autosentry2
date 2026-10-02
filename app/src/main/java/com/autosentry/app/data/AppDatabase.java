@@ -18,9 +18,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         Session.class,
         TripPoint.class,
         MaintenanceEvent.class,
-        MaintenanceAttachment.class
+        MaintenanceAttachment.class,
+        KoeoReport.class
     },
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 public abstract class AppDatabase extends RoomDatabase {
@@ -31,6 +32,7 @@ public abstract class AppDatabase extends RoomDatabase {
     public abstract TripPointDao tripPointDao();
     public abstract MaintenanceDao maintenanceDao();
     public abstract MaintenanceAttachmentDao maintenanceAttachmentDao();
+    public abstract KoeoReportDao koeoReportDao();
 
     /**
      * Adds photo-attachment support without wiping data. This tablet has a
@@ -56,6 +58,26 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /** Adds key-on (KOEO) reports. */
+    static final Migration MIGRATION_2_3 = new Migration(2, 3) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS koeo_reports (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "timestamp INTEGER NOT NULL, " +
+                "keyOnVolts REAL NOT NULL, " +
+                "readings TEXT, " +
+                "storedCodes TEXT, " +
+                "pendingCodes TEXT, " +
+                "crankAttempts INTEGER NOT NULL, " +
+                "crankSeconds REAL NOT NULL, " +
+                "minCrankVolts REAL NOT NULL, " +
+                "started INTEGER NOT NULL)"
+            );
+        }
+    };
+
     private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
         try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {
             int nameIndex = cursor.getColumnIndex("name");
@@ -76,7 +98,7 @@ public abstract class AppDatabase extends RoomDatabase {
                             context.getApplicationContext(),
                             AppDatabase.class,
                             "autosentry.db"
-                    ).addMigrations(MIGRATION_1_2).build();
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build();
                 }
             }
         }

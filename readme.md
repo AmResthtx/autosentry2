@@ -13,6 +13,7 @@ The whole point is zero change to the driver's habits. Pair the OBD adapter once
 - **GPS-based trip computer** — speed, distance, and real-time MPG computed from MAF airflow and GPS speed. Every automatically detected trip is logged with distance, fuel used, and average MPG.
 - **Automatic key-on tracking** — full-power monitoring (CPU awake, 4 polls a second, GPS, 1-second reconnects) runs only while the engine is turning and a trip is open. With the truck off the monitor drops to low power: adapter link closed so it can sleep, no GPS, no wake lock, and an exact alarm wakes the tablet every 15 seconds for one quick key-on check (unlocking the tablet or plugging in power checks at once). A trip starts within seconds of key-on even if the app was never opened. It restarts itself after a reboot, an app update, or a system kill (15-minute watchdog). A dropped link mid-drive is retried immediately and the gap is filled from GPS when location is allowed; the trip closes once the truck has been off (or the adapter silent) for 2 minutes. Only typing STOP or turning auto-tracking off keeps it down.
 - **Connection test** — Account > Test OBD Connection checks background-start permission, location, Bluetooth, the adapter link, adapter ID, OBD-port voltage, whether the truck computer answers, and live RPM/speed/oil temp, and says which step failed.
+- **Key-on check (KOEO)** — every key cycle, before cranking, AutoSentry snapshots battery voltage at the OBD port, every standard reading the truck answers (plus the 7.3L's Ford oil temp), and stored and pending trouble codes. It then times the crank (RPM above 0 but under 500), counts tries, and records the lowest cranking voltage and whether the engine started. Reports are on the Diagnostics tab; **Run Key-On Check** takes one on demand with the key ON and the engine off. Ford's commanded self-tests (on-demand KOEO self-test, injector buzz test, glow plug test) are not sent: their 7.3L request bytes aren't verified here, and the buzz test energizes injectors.
 - **Pick your readings** — Dashboard > Choose Readings (PIDs) lists every supported reading; ones the truck hasn't confirmed are labeled instead of hidden.
 - **Honest data status** — connection loss, missing PID responses, stale readings, unsupported vehicle data, and degraded monitoring are surfaced to the user. AutoSentry does not silently present simulator data as real vehicle data.
 - **Maintenance history with evidence** — users enter maintenance they performed and may attach receipts, parts photos, or installation photos. Records are labeled according to their evidence rather than being treated as verified merely because the user entered them.
@@ -110,7 +111,7 @@ The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). C
 ## Planned directions
 
 - Configurable PID catalog with vehicle-specific defaults and user-selected signals.
-- KOEO capture and crank/no-start reports based on the values the truck actually returns.
+- Ford commanded KOEO tests (on-demand self-test, injector buzz, glow plug) once their 7.3L requests are verified on the truck.
 - PID availability, stale-data, and drift detection with evidence-backed notifications.
 - Receipt capture and clearer maintenance evidence states.
 - Vehicle-specific maintenance profiles for additional makes, models, engines, and drivetrains.

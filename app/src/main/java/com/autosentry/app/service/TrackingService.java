@@ -28,7 +28,10 @@ import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
+import com.autosentry.app.engine.CrankLog;
+import com.autosentry.app.engine.EngineWatch;
 import com.autosentry.app.engine.OilLifeEngine;
+import com.autosentry.app.engine.StallLog;
 import com.autosentry.app.fuel.MpgCalculator;
 import com.autosentry.app.gps.GpsTracker;
 import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
@@ -41,12 +44,16 @@ import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
+import com.autosentry.app.util.TabletFiles;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.Collections;
+import java.util.Date;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -104,10 +111,11 @@ public class TrackingService extends Service {
     private static final long OIL_PROBE_RETRY_MS = 30_000L;
     // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
     private static final long OIL_READ_INTERVAL_MS = 2_000L;
-    // Cranking stays well under this and idle sits above it, so crossing it means the engine started.
-    private static final double STARTED_RPM = 500.0;
     // GPS below this is parked jitter, not driving.
     private static final double GPS_MOVING_MPH = 3.0;
+    private static final double STARTED_RPM = EngineWatch.RUNNING_RPM;
+    private static final int STALL_ALERT_ID = 3000;
+    private static final int CRANK_ALERT_ID = 3001;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -135,6 +143,10 @@ public class TrackingService extends Service {
     // Avoids re-notifying every tick once an item crosses 80%; cleared
     // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
+    // Stall alert while running; second-by-second RPM swings only while cranking.
+    private final EngineWatch engineWatch = new EngineWatch();
+    private final StallLog stallLog = new StallLog();
+    private CrankLog crankLog; // non-null while the starter is turning
 
     private volatile double lastSpeedMph = 0;
     private volatile double lastLat = 0, lastLon = 0;
@@ -382,6 +394,8 @@ public class TrackingService extends Service {
      */
     private void waitForKeyOn() {
         finishKoeo(); // key cycle over: keep whatever the crank showed (or that it never cranked)
+        long now = System.currentTimeMillis();
+        onEngineEvents(engineWatch.update(now, null), now, null); // truck off: a crank still open ends as no start
         if (realAdapter.isConnected()) {
             realAdapter.disconnect();
             supportedPids = Collections.emptySet();
@@ -739,6 +753,10 @@ public class TrackingService extends Service {
     }
 
     private void pollOnce() throws IOException {
+        if (crankLog != null) {
+            pollCranking();
+            return;
+        }
         Set<Integer> want = new LinkedHashSet<>(AppSettings.getDashboardPids(this));
         want.add(PidCatalog.RPM);
         want.add(PidCatalog.SPEED);
@@ -780,6 +798,9 @@ public class TrackingService extends Service {
         // One dropped RPM answer must not pause the trip while the truck is plainly moving.
         boolean engineRunning = (rpm != null && rpm > 0) || (obdSpeed != null && obdSpeed > 0);
         trackKeyOnAndCrank(now, rpm, engineRunning);
+        stallLog.add(now, LiveReadings.values);
+        onEngineEvents(engineWatch.update(now, rpm), now, rpm);
+        if (crankLog != null) return; // cranking: the next ticks read only what the crank check needs
 
         if (!engineRunning) {
             LiveReadings.engineRunning = false;
@@ -864,6 +885,68 @@ public class TrackingService extends Service {
         }
     }
 
+    /** While the starter turns: only RPM, ICP/IPR and battery voltage, as often as the bus answers. */
+    private void pollCranking() throws IOException {
+        double rpmValue = PidCatalog.get(PidCatalog.RPM).decode(realAdapter.readPid(PidCatalog.RPM));
+        Double rpm = Double.isNaN(rpmValue) ? null : rpmValue;
+        double[] icpIpr = pwmBus ? realAdapter.readFordIcpIpr() : new double[]{Double.NaN, Double.NaN};
+        double volts = realAdapter.readVolts();
+        long now = System.currentTimeMillis();
+        crankLog.add(now, rpmValue, icpIpr[0], icpIpr[1], volts > 0 ? volts : Double.NaN);
+        if (rpm == null) {
+            LiveReadings.values.remove(PidCatalog.RPM);
+        } else {
+            LiveReadings.values.put(PidCatalog.RPM, rpm);
+        }
+        LiveReadings.status = crankLog.liveLine();
+        updateNotification(LiveReadings.status);
+        lastConnectedTimestamp = now;
+        lastTickTimestamp = now; // cranking isn't engine-on time
+        trackKeyOnAndCrank(now, rpm, rpm != null && rpm > 0); // the key cycle's crank timing keeps counting
+        onEngineEvents(engineWatch.update(now, rpm), now, rpm);
+    }
+
+    private void onEngineEvents(List<EngineWatch.Event> events, long now, Double rpm) {
+        for (EngineWatch.Event event : events) {
+            switch (event) {
+                case STALLED: {
+                    long at = engineWatch.lastStallAt();
+                    String where = saveReport("stall", at, stallLog.report(at));
+                    AppLog.i(this, TAG, "Stall: RPM fell to 0 with the key on. Report: " + where);
+                    postAlert(STALL_ALERT_ID, "Engine stalled",
+                            "RPM fell to 0 with the key on. Last minute of readings saved to " + where);
+                    break;
+                }
+                case CRANK_STARTED:
+                    crankLog = new CrankLog(now);
+                    crankLog.add(now, rpm != null ? rpm : Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+                    LiveReadings.status = crankLog.liveLine();
+                    break;
+                case STARTED:
+                case NO_START: {
+                    boolean started = event == EngineWatch.Event.STARTED;
+                    String summary = crankLog.summary(started, now);
+                    String where = saveReport("crank", crankLog.startedAt(), crankLog.report(started, now));
+                    AppLog.i(this, TAG, summary + ". Report: " + where);
+                    postAlert(CRANK_ALERT_ID, started ? "Engine started" : "No start", summary + ". Saved to " + where);
+                    crankLog = null;
+                    break;
+                }
+            }
+        }
+    }
+
+    /** Writes a report to the tablet; returns where it went, or why it didn't. */
+    private String saveReport(String kind, long at, String text) {
+        String name = kind + "_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date(at)) + ".csv";
+        try {
+            return TabletFiles.save(this, name, text);
+        } catch (IOException | RuntimeException e) {
+            AppLog.e(this, TAG, "Couldn't save " + name, e);
+            return "nowhere (" + e.getMessage() + ")";
+        }
+    }
+
     /** Writes pending driving as deltas, then reloads the row to pick up UI edits (odometer, oil change). */
     private void flushProfile() {
         if (pendingMiles > 0 || pendingHours > 0 || pendingGallons > 0 || pendingOilPercent > 0) {
@@ -932,18 +1015,22 @@ public class TrackingService extends Service {
         String text = status.overdue
                 ? String.format(java.util.Locale.US, "%s is overdue (%.0f%% of service life used)", status.displayName, status.percentOfLifeUsed)
                 : String.format(java.util.Locale.US, "%s at %.0f%% of service life — %.0f mi remaining", status.displayName, status.percentOfLifeUsed, status.milesRemaining());
+        postAlert(2000 + status.type.ordinal(), status.overdue ? "Maintenance overdue" : "Maintenance due soon", text);
+    }
 
+    private void postAlert(int id, String title, String text) {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ALERTS)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(status.overdue ? "Maintenance overdue" : "Maintenance due soon")
+                .setContentTitle(title)
                 .setContentText(text)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true);
 
         android.app.NotificationManager manager =
                 (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
-            manager.notify(2000 + status.type.ordinal(), builder.build());
+            manager.notify(id, builder.build());
         }
     }
 

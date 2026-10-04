@@ -19,6 +19,10 @@ The whole point is zero change to the driver's habits. Pair the OBD adapter once
 - **Maintenance history with evidence** — users enter maintenance they performed and may attach receipts, parts photos, or installation photos. Records are labeled according to their evidence rather than being treated as verified merely because the user entered them.
 - **On-device debug log** — crashes and errors are written to a local log that can be viewed and shared from the app.
 
+## Setup wizard
+
+First launch (and Account > Setup Wizard) walks through setup in phases. Phase 1 gets the app talking to the truck: permissions and background start, choosing the paired OBD adapter, running the truck connection test, choosing duty cycle and odometer, and picking the dashboard readings. Each step saves as you go. Later phases ship as further wizards; `AppSettings.getSetupPhaseDone` records how far you got.
+
 ## 2000 F-250 7.3L maintenance model
 
 The maintenance schedule is a starting point, not a substitute for the truck's owner's manual, diesel supplement, service manual, component instructions, or a qualified inspection. Exact equipment, drivetrain, axle, transmission, operating environment, and prior repairs matter.

@@ -314,6 +314,13 @@
                 android:padding="16dp">
 
                 <Button
+                    android:id="@+id/buttonSetupWizard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="Setup Wizard" />
+
+                <Button
                     android:id="@+id/buttonPairAdapter"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

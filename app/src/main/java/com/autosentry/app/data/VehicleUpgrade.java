@@ -119,6 +119,12 @@ public class VehicleUpgrade {
     public int upgradePromptCount;        // how many times user has been asked (to space out prompts)
     public String notes;                  // free-form user notes on other mods
 
+    public boolean hasConfirmedAnyUpgrade() {
+        return injectorUpgradeConfirmed || turboUpgradeConfirmed || tireUpgradeConfirmed
+            || camshaftUpgradeConfirmed || fuelPumpUpgradeConfirmed || engineTuneConfirmed
+            || alternatorUpgradeTimestamp > 0;
+    }
+
     public static VehicleUpgrade newDefault() {
         VehicleUpgrade u = new VehicleUpgrade();
         u.id = 1L;

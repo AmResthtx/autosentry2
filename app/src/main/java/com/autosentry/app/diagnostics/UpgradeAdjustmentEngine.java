@@ -1,8 +1,6 @@
 package com.autosentry.app.diagnostics;
 
 import com.autosentry.app.data.VehicleUpgrade;
-import com.autosentry.app.maintenance.ServiceIntervalWithPredict;
-import com.autosentry.app.maintenance.ServiceItemType;
 
 import java.util.HashMap;
 import java.util.Map;

@@ -119,7 +119,7 @@ public class VehicleHistoryReport {
             sb.append("Estimated Resale Impact: POSITIVE\n");
             sb.append("Potential Buyer Perception: Well-maintained, upgraded truck\n");
             sb.append("Estimated Value Impact: +10% to +25% premium vs baseline\n");
-        } else if (repairs > 2 && lowers > improves) {
+        } else if (repairs.size() > 2 && lowers > improves) {
             sb.append("Estimated Resale Impact: CAUTION\n");
             sb.append("Potential Buyer Perception: Multiple issues, buyer skeptical\n");
             sb.append("Estimated Value Impact: -5% to -15%\n");

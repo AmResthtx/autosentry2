@@ -1,7 +1,8 @@
 package com.autosentry.app.obd;
 
 import java.util.Collections;
-import java.util.EnumSet;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -15,7 +16,7 @@ import java.util.Set;
  * stops watching what matters.
  */
 public final class CriticalPidSet {
-    private static final Set<Integer> CRITICAL = EnumSet.of(
+    private static final Set<Integer> CRITICAL = new HashSet<>(Arrays.asList(
         // Engine vitals: without these, we can't determine if the truck is running or in trouble
         PidCatalog.RPM,                    // 0x0C — mandatory for crank detection, oil life, trip start
         PidCatalog.SPEED,                  // 0x0D — mandatory for distance, MPG, trip detection
@@ -40,7 +41,7 @@ public final class CriticalPidSet {
         // Temps: thermal anomalies from failing sensors or electrical noise
         0x0F,  // Intake air temp — sensor reading stability
         0x46   // Ambient air temp — sensor baseline
-    );
+    ));
 
     private CriticalPidSet() {}
 
@@ -66,7 +67,7 @@ public final class CriticalPidSet {
      * Returns a new set that includes both.
      */
     public static Set<Integer> withUserChoices(Set<Integer> userDashboardPids) {
-        Set<Integer> merged = EnumSet.copyOf(CRITICAL);
+        Set<Integer> merged = new HashSet<>(CRITICAL);
         if (userDashboardPids != null) {
             merged.addAll(userDashboardPids);
         }

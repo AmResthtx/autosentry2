@@ -94,6 +94,17 @@ public class SetupWizardActivity extends AppCompatActivity {
     };
 
     @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        NavHelper.addMainMenuItem(this, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        return NavHelper.handle(this, item) || super.onOptionsItemSelected(item);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         db = AppDatabase.getInstance(this);
@@ -134,6 +145,7 @@ public class SetupWizardActivity extends AppCompatActivity {
             return insets;
         });
         setContentView(root);
+        NavHelper.enableBack(this);
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override

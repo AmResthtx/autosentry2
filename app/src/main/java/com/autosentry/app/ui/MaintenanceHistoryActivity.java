@@ -44,9 +44,21 @@ public class MaintenanceHistoryActivity extends AppCompatActivity {
     private TextView textEmpty;
 
     @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        NavHelper.addMainMenuItem(this, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        return NavHelper.handle(this, item) || super.onOptionsItemSelected(item);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maintenance_history);
+        NavHelper.enableBack(this);
         db = AppDatabase.getInstance(this);
         listEvents = findViewById(R.id.listEvents);
         textEmpty = findViewById(R.id.textEmpty);

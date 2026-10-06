@@ -31,9 +31,21 @@ public class DebugLogActivity extends AppCompatActivity {
     private TextView textLogContent;
 
     @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        NavHelper.addMainMenuItem(this, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        return NavHelper.handle(this, item) || super.onOptionsItemSelected(item);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_debug_log);
+        NavHelper.enableBack(this);
 
         textLogContent = findViewById(R.id.textLogContent);
         Button buttonRefresh = findViewById(R.id.buttonRefreshLog);

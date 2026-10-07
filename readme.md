@@ -109,7 +109,7 @@ All storage is local (Room + SharedPreferences). No account or cloud dependency 
 ./gradlew assembleRelease
 ```
 
-Outputs to `app/build/outputs/apk/release/app-release.apk`, signed with the Android debug key (fine for sideloading onto a test device; not intended for store distribution as-is).
+Outputs to `app/build/outputs/apk/release/app-release.apk`. Local and pull-request builds use the debug key unless persistent signing credentials are configured; published GitHub release builds require the persistent key described below.
 
 The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). CI builds use the GitHub Actions run number; local builds are build 1.
 

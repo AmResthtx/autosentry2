@@ -25,6 +25,7 @@ import java.util.Locale;
  */
 public final class AppLog {
     private static final String LOG_FILE_NAME = "autosentry_debug_log.txt";
+    private static final String LOG_DIR_NAME = "logs"; // only this dir is exposed via FileProvider
     private static final long MAX_LOG_BYTES = 512 * 1024L; // rotate at 512KB
     private static final SimpleDateFormat TIMESTAMP_FORMAT =
             new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
@@ -66,7 +67,9 @@ public final class AppLog {
     }
 
     private static File logFile(Context context) {
-        return new File(context.getApplicationContext().getFilesDir(), LOG_FILE_NAME);
+        File dir = new File(context.getApplicationContext().getFilesDir(), LOG_DIR_NAME);
+        if (!dir.exists()) dir.mkdirs();
+        return new File(dir, LOG_FILE_NAME);
     }
 
     public static String readAll(Context context) {

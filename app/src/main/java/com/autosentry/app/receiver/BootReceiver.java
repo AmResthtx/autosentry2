@@ -10,6 +10,12 @@ import com.autosentry.app.service.TrackingService;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        TrackingService.startIfEnabled(context, String.valueOf(intent.getAction()));
+        String action = intent.getAction();
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
+                && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
+                && !"android.intent.action.QUICKBOOT_POWERON".equals(action)) {
+            return; // ignore anything that isn't a system boot/update broadcast
+        }
+        TrackingService.startIfEnabled(context, action);
     }
 }

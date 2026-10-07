@@ -58,7 +58,26 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest
 
+      - name: Prepare persistent release signing key
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.AUTOSENTRY_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
+        run: |
+          : "${KEYSTORE_BASE64:?Add the persistent release keystore as AUTOSENTRY_RELEASE_KEYSTORE_BASE64}"
+          : "${STORE_PASSWORD:?Add AUTOSENTRY_RELEASE_STORE_PASSWORD}"
+          : "${KEY_ALIAS:?Add AUTOSENTRY_RELEASE_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Add AUTOSENTRY_RELEASE_KEY_PASSWORD}"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/autosentry-release.jks"
+
       - name: Build release APK
+        env:
+          AUTOSENTRY_RELEASE_STORE_FILE: ${{ runner.temp }}/autosentry-release.jks
+          AUTOSENTRY_RELEASE_STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
+          AUTOSENTRY_RELEASE_KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
+          AUTOSENTRY_RELEASE_KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Build debug APK

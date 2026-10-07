@@ -8,6 +8,11 @@ android {
     namespace = "com.autosentry.app"
     compileSdk = 35
 
+    val releaseStoreFile = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_FILE").orNull
+    val releaseStorePassword = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_PASSWORD").orNull
+
     defaultConfig {
         applicationId = "com.autosentry.app"
         minSdk = 24
@@ -23,7 +28,20 @@ android {
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.create("stableRelease") {
+                if (releaseStoreFile != null &&
+                    releaseStorePassword != null &&
+                    releaseKeyAlias != null &&
+                    releaseKeyPassword != null
+                ) {
+                    storeFile = file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                } else {
+                    initWith(signingConfigs.getByName("debug"))
+                }
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

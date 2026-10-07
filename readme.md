@@ -109,9 +109,17 @@ All storage is local (Room + SharedPreferences). No account or cloud dependency 
 ./gradlew assembleRelease
 ```
 
-Outputs to `app/build/outputs/apk/release/app-release.apk`, signed with the Android debug key (fine for sideloading onto a test device; not intended for store distribution as-is).
+Outputs to `app/build/outputs/apk/release/app-release.apk`. Local and pull-request builds use the debug key unless persistent signing credentials are configured; published GitHub release builds require the persistent key described below.
 
 The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). CI builds use the GitHub Actions run number; local builds are build 1.
+
+### Installing updates without losing data
+
+Android keeps AutoSentry's local data when an APK is installed as an update. Keep the application ID (`com.autosentry.app`) unchanged, install a build with a higher version code, and sign every update with the same key. Do not uninstall AutoSentry or clear its storage.
+
+Published GitHub release APKs use a persistent signing keystore. Create a keystore once and store it securely; add its Base64-encoded contents and credentials as repository Actions secrets named `AUTOSENTRY_RELEASE_KEYSTORE_BASE64`, `AUTOSENTRY_RELEASE_STORE_PASSWORD`, `AUTOSENTRY_RELEASE_KEY_ALIAS`, and `AUTOSENTRY_RELEASE_KEY_PASSWORD`. The workflow requires these secrets for branch-push releases. Pull-request builds may use the debug key and should not be used as release updates.
+
+For example, create a new keystore with `keytool -genkeypair -v -keystore autosentry-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias autosentry`, then Base64-encode the file when adding the secret. Never commit the keystore or its passwords. **If the installed app was signed with a different key, the first update signed by this keystore will be rejected by Android.** Use the same original signing key for the transition; if it is unavailable, back up data before uninstalling because the signing key cannot be changed while preserving Android's app data.
 
 ## Planned directions
 

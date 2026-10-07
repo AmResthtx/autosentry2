@@ -591,11 +591,16 @@ public class MainActivity extends AppCompatActivity {
             if (value == null && id == PidCatalog.COMPUTED_ODOMETER && profile != null) {
                 value = profile.odometerMiles;
             }
+            TextView tv = entry.getValue();
+            tv.setTextSize(32);
+            tv.setTextColor(Color.parseColor(value != null ? "#F5F7FA" : "#52606D"));
             if (value != null) {
                 entry.getValue().setText(def == null ? "--" : def.formatValue(value));
             } else if (def != null && !def.computed && !supported.isEmpty() && !supported.contains(id)) {
                 // Truck has been scanned and confirmed it doesn't answer this one — say so
                 // instead of leaving it blank with no explanation.
+                tv.setTextSize(16);
+                tv.setTextColor(Color.parseColor("#E8A33D"));
                 entry.getValue().setText("Not supported");
             } else {
                 entry.getValue().setText("--");
@@ -621,20 +626,24 @@ public class MainActivity extends AppCompatActivity {
             LinearLayout tile = new LinearLayout(this);
             tile.setOrientation(LinearLayout.VERTICAL);
             tile.setPadding(pad, pad, pad, pad);
-            GradientDrawable border = new GradientDrawable();
-            border.setCornerRadius(8 * density);
-            border.setStroke(Math.max(1, Math.round(density)), Color.parseColor("#55888888"));
-            tile.setBackground(border);
+            GradientDrawable card = new GradientDrawable();
+            card.setCornerRadius(14 * density);
+            card.setColor(Color.parseColor("#1F2933"));
+            card.setStroke(Math.max(1, Math.round(density)), Color.parseColor("#3E4C59"));
+            tile.setBackground(card);
+            tile.setElevation(3 * density);
 
             TextView label = new TextView(this);
             label.setText(def.label());
             label.setTextSize(12);
-            label.setTextColor(Color.parseColor("#888888"));
+            label.setAllCaps(true);
+            label.setTextColor(Color.parseColor("#9AA5B1"));
 
             TextView value = new TextView(this);
             value.setText("--");
-            value.setTextSize(28);
-            value.setTypeface(null, Typeface.BOLD);
+            value.setTextSize(32);
+            value.setTextColor(Color.parseColor("#52606D"));
+            value.setTypeface(Typeface.DEFAULT_BOLD);
 
             tile.addView(label);
             tile.addView(value);

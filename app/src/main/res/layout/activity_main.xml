@@ -92,22 +92,31 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <TextView
-                    android:id="@+id/textAdapterStatus"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textSize="13sp"
-                    android:textColor="#757575"
-                    android:text="No OBD adapter paired yet" />
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="#102A43">
 
-                <TextView
-                    android:id="@+id/textLiveStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:text="Tracking is off" />
+                    <TextView
+                        android:id="@+id/textLiveStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="20sp"
+                        android:textStyle="bold"
+                        android:textColor="#F0F4F8"
+                        android:text="Tracking is off" />
+
+                    <TextView
+                        android:id="@+id/textAdapterStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textSize="13sp"
+                        android:textColor="#9FB3C8"
+                        android:text="No OBD adapter paired yet" />
+                </LinearLayout>
 
                 <GridLayout
                     android:id="@+id/gridTiles"

@@ -8,6 +8,11 @@ Talks straight to the ELM327/OBDLink adapter over its Bluetooth SPP COM
 port (no phone/app involved) using the same AT init AutoSentry uses.
 
 Usage:
+    Discovery options (find PIDs the app can't read yet):
+       python tools/obd_probe.py --forscan pids.csv   # try PIDs from a FORScan export
+       python tools/obd_probe.py --sweep 1000 1500    # brute-force Mode 22 range (hex)
+    Compare answering PIDs' raw bytes with the value FORScan shows to derive scaling.
+
     1. Pair the OBD adapter to this Windows machine (Settings > Bluetooth),
        key the truck on (accessory or running).
     2. python tools/obd_probe.py            # auto-detects the COM port
@@ -158,8 +163,55 @@ CANDIDATE_MODE22_PIDS = [
 ]
 
 
+def forscan_candidates(path):
+    """Mode 22 PIDs from a FORScan-exported CSV/log or PID list.
+
+    FORScan lists enhanced PIDs as 4 hex digits (e.g. 'ICP_PSI,1446' or
+    'PID 0x1310'). Any 4-digit hex token found is a candidate; we never trust
+    its scaling, only whether the PCM answers, and print the raw bytes so the
+    formula can be worked out against what FORScan shows on screen.
+    """
+    found = []
+    for line in Path(path).read_text(errors="replace").splitlines():
+        for m in re.finditer(r"(?<![0-9A-Fa-f])(?:0x)?([0-9A-Fa-f]{4})(?![0-9A-Fa-f])", line):
+            pid = m.group(1).upper()
+            label = re.sub(r"\s+", " ", line.strip())[:40]
+            if pid not in [p for _, p in found]:
+                found.append((label, pid))
+    return found
+
+
+def sweep_mode22(adapter, start, end, header="ATSHC410F1"):
+    """Asks the PCM for every Mode 22 PID in [start, end]; logs the ones that answer."""
+    log(f"\n=== Mode 22 sweep {start:04X}-{end:04X} (header {header}) ===")
+    adapter.command(header)
+    hits = []
+    for pid in range(start, end + 1):
+        resp = adapter.command(f"22{pid:04X}", timeout=1.5)
+        up = re.sub(r"\s", "", resp).upper()
+        if f"62{pid:04X}" in up:
+            raw = [l for l in clean_lines(resp)]
+            hits.append(pid)
+            log(f"  22{pid:04X} ANSWERS: {raw}")
+    log(f"Sweep done: {len(hits)} PID(s) answered: {' '.join(f'{p:04X}' for p in hits)}")
+    adapter.command("ATSH616AF1")
+    return hits
+
+
 def main():
-    port = sys.argv[1] if len(sys.argv) > 1 else find_adapter_port()
+    # Optional flags: --forscan FILE (try PIDs seen in FORScan), --sweep START END (hex)
+    args = sys.argv[1:]
+    forscan_file = None
+    sweep = None
+    if "--forscan" in args:
+        i = args.index("--forscan")
+        forscan_file = args[i + 1]
+        del args[i:i + 2]
+    if "--sweep" in args:
+        i = args.index("--sweep")
+        sweep = (int(args[i + 1], 16), int(args[i + 2], 16))
+        del args[i:i + 3]
+    port = args[0] if args else find_adapter_port()
     if not port:
         log("No Bluetooth COM port found/paired. Pair the adapter in Windows "
             "Settings > Bluetooth first, then re-run this script (or pass the "
@@ -237,6 +289,20 @@ def main():
                 log(f"  {name:30s} [22{pid_hex}] no answer")
             else:
                 log(f"  {name:30s} [22{pid_hex}] RAW RESPONSE: {lines}  <-- looks live, investigate")
+
+        if forscan_file:
+            log(f"\n=== Trying PIDs found in FORScan file {forscan_file} ===")
+            adapter.command("ATSHC410F1")
+            for label, pid_hex in forscan_candidates(forscan_file):
+                resp = adapter.command(f"22{pid_hex}", timeout=2)
+                if f"62{pid_hex}" in re.sub(r"\s", "", resp).upper():
+                    log(f"  {label:40s} [22{pid_hex}] ANSWERS: {clean_lines(resp)}")
+                else:
+                    log(f"  {label:40s} [22{pid_hex}] no answer")
+            adapter.command("ATSH616AF1")
+
+        if sweep:
+            sweep_mode22(adapter, *sweep)
 
         # --- stored diagnostic codes, since we're already connected ---
         log("\n=== Stored DTCs (Mode 03) ===")

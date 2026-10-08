@@ -364,6 +364,13 @@
                     android:text="Save trips to tablet" />
 
                 <Button
+                    android:id="@+id/buttonDiscovery"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Truck Discovery (find every reading the truck answers)" />
+
+                <Button
                     android:id="@+id/buttonDebugLog"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

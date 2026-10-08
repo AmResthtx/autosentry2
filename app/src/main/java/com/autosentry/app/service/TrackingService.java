@@ -134,9 +134,8 @@ public class TrackingService extends Service {
     private boolean fordOilTemp = false;
     private boolean pwmBus = false;
     private boolean canBus = false;
-    // This key cycle's KOEO report: captured before cranking, saved again when the crank ends.
+    // KOEO report from "Run Key-On Check" (no-start diagnosis only, never automatic): saved again when the crank ends.
     private KoeoReport koeo;
-    private boolean koeoDue = false;
     private long crankStart = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
@@ -499,7 +498,6 @@ public class TrackingService extends Service {
         String upper = protocol.toUpperCase(java.util.Locale.US);
         pwmBus = upper.contains("PWM");
         canBus = upper.contains("CAN") || upper.contains("15765");
-        if (koeo == null) koeoDue = true; // fresh truck contact: snapshot it if the engine isn't running yet
         probeFordOilTemp();
         AppLog.i(this, TAG, "Truck answered on " + protocol
                 + "; supported PIDs: " + describePids(found)
@@ -632,15 +630,10 @@ public class TrackingService extends Service {
     }
 
     /**
-     * KOEO: the first look at the truck in a key cycle, before the engine turns, gets a
-     * snapshot. After that, RPM between 0 and STARTED_RPM is cranking: time it and track
-     * the lowest battery voltage until the engine starts or the crank gives up.
+     * After an on-demand KOEO check, RPM between 0 and STARTED_RPM is cranking: time it and
+     * track the lowest battery voltage until the engine starts or the crank gives up.
      */
     private void trackKeyOnAndCrank(long now, Double rpm, boolean engineRunning) throws IOException {
-        if (koeoDue) {
-            koeoDue = false;
-            if (!engineRunning) captureKoeo(now); // already running = joined mid-drive, nothing to capture
-        }
         if (koeo == null || koeo.started || rpm == null) return; // no RPM answer this tick: no information
         if (rpm > 0 && rpm < STARTED_RPM) {
             if (crankStart == 0) {
@@ -736,7 +729,6 @@ public class TrackingService extends Service {
                 r.append("✗ Engine is running. Shut it off, leave the key ON, and run the check again.");
                 return;
             }
-            koeoDue = false;
             captureKoeo(System.currentTimeMillis());
             r.append(koeo.summary()).append("\n\nCrank whenever you're ready — the start is timed and saved.");
         } catch (IOException | RuntimeException e) {

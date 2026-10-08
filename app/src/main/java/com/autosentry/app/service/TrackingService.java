@@ -444,8 +444,10 @@ public class TrackingService extends Service {
         supportedPids = Collections.emptySet();
         try {
             realAdapter.connect();
-            AppLog.i(this, TAG, "OBD adapter connected"
-                    + (connectFailures > 0 ? " after " + connectFailures + " attempts" : ""));
+            // Every 15 s key-on knock with the truck off connects too; "Truck answered" marks real contact.
+            if (connectFailures > 0) {
+                AppLog.i(this, TAG, "OBD adapter connected after " + connectFailures + " attempts");
+            }
             connectFailures = 0;
             lastConnectError = null;
             return true;

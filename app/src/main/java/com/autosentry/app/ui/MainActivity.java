@@ -16,12 +16,15 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -50,16 +53,14 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Five tabs: Dashboard (live readings the user picks via "Edit Dashboard"),
+ * Five tabs: Dashboard (gauges for the live readings the user picks via "Edit readings"),
  * Diagnostics, History (oil life and the full service schedule, driven by
  * engine-on time and distance), Deals, and Account (adapter setup).
  */
@@ -83,10 +84,33 @@ public class MainActivity extends AppCompatActivity {
     // Runs once the Bluetooth permission dialog is answered with a grant.
     private Runnable afterPermissions;
 
-    private final Map<Integer, TextView> tileValues = new HashMap<>();
-    private GridLayout gridTiles;
+    /** One dashboard reading: a gauge when it has a normal range, otherwise a plain value tile. */
+    private static final class Tile {
+        final int pidId;
+        final String name;
+        final ArcGaugeView gauge; // null for plain tiles
+        final TextView value;     // null for gauge tiles
+        final TextView label;
+        final View root;
+
+        Tile(int pidId, String name, ArcGaugeView gauge, TextView value, TextView label, View root) {
+            this.pidId = pidId;
+            this.name = name;
+            this.gauge = gauge;
+            this.value = value;
+            this.label = label;
+            this.root = root;
+        }
+    }
+
+    private final List<Tile> tiles = new ArrayList<>();
+    private GridLayout gridHero, gridTiles, gridPlain;
     private View[] tabViews;
-    private Button[] tabButtons;
+    private TextView[] tabButtons;
+    private int cOk, cWarn, cCrit, cText, cMuted;
+    private TextView textHealth, textDashOilPct, textDashNextService;
+    private ProgressBar progressOil;
+    private Button buttonTileSize;
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList,
             textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
@@ -101,10 +125,23 @@ public class MainActivity extends AppCompatActivity {
 
         db = AppDatabase.getInstance(this);
 
+        cOk = ContextCompat.getColor(this, R.color.dash_ok);
+        cWarn = ContextCompat.getColor(this, R.color.dash_warn);
+        cCrit = ContextCompat.getColor(this, R.color.dash_crit);
+        cText = ContextCompat.getColor(this, R.color.dash_text);
+        cMuted = ContextCompat.getColor(this, R.color.dash_muted);
+
+        gridHero = findViewById(R.id.gridHero);
         gridTiles = findViewById(R.id.gridTiles);
+        gridPlain = findViewById(R.id.gridPlain);
+        textHealth = findViewById(R.id.textHealth);
+        textDashOilPct = findViewById(R.id.textDashOilPct);
+        textDashNextService = findViewById(R.id.textDashNextService);
+        progressOil = findViewById(R.id.progressOil);
+        buttonTileSize = findViewById(R.id.buttonTileSize);
         tabViews = new View[]{findViewById(R.id.scrollDashboard), findViewById(R.id.scrollDiagnostics),
                 findViewById(R.id.scrollService), findViewById(R.id.scrollDeals), findViewById(R.id.scrollAccount)};
-        tabButtons = new Button[]{findViewById(R.id.buttonTabDashboard), findViewById(R.id.buttonTabDiagnostics),
+        tabButtons = new TextView[]{findViewById(R.id.buttonTabDashboard), findViewById(R.id.buttonTabDiagnostics),
                 findViewById(R.id.buttonTabService), findViewById(R.id.buttonTabDeals), findViewById(R.id.buttonTabAccount)};
         textAdapterStatus = findViewById(R.id.textAdapterStatus);
         textLiveStatus = findViewById(R.id.textLiveStatus);
@@ -145,6 +182,11 @@ public class MainActivity extends AppCompatActivity {
             tabButtons[i].setOnClickListener(v -> showTab(tab));
         }
         buttonEditDashboard.setOnClickListener(v -> showEditDashboard());
+        buttonTileSize.setOnClickListener(v -> {
+            AppSettings.setTileSize(this, (AppSettings.getTileSize(this) + 1) % 3);
+            rebuildTiles();
+        });
+        findViewById(R.id.cardService).setOnClickListener(v -> showTab(TAB_HISTORY));
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
         buttonResetOil.setOnClickListener(v -> resetOilLife());
         buttonLogMaintenance.setOnClickListener(v -> startActivity(new Intent(this, LogMaintenanceActivity.class)));
@@ -218,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
         currentTab = tab;
         for (int i = 0; i < tabViews.length; i++) {
             tabViews[i].setVisibility(i == tab ? View.VISIBLE : View.GONE);
-            tabButtons[i].setEnabled(i != tab);
+            tabButtons[i].setSelected(i == tab);
         }
         lastDbRefresh = 0; // refresh the history tab right away
     }
@@ -576,91 +618,183 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateLiveStatus() {
         boolean running = TrackingService.isRunning;
-        String startLabel = AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking" : "Start Tracking (pair adapter first)";
+        String startLabel = AppSettings.hasObdAdapterConfigured(this) ? "Start Tracking" : "Pair adapter";
         buttonToggleTracking.setText(running ? "Stop Tracking" : startLabel);
         textLiveStatus.setText(LiveReadings.status);
     }
 
     private void updateTiles() {
         Set<Integer> supported = LiveReadings.supported;
-        for (Map.Entry<Integer, TextView> entry : tileValues.entrySet()) {
-            int id = entry.getKey();
-            PidCatalog.Pid def = PidCatalog.get(id);
-            Double value = LiveReadings.values.get(id);
-            VehicleProfile profile = lastProfile;
-            if (value == null && id == PidCatalog.COMPUTED_ODOMETER && profile != null) {
+        VehicleProfile profile = lastProfile;
+        int readings = 0, watch = 0, critical = 0;
+        for (Tile tile : tiles) {
+            PidCatalog.Pid def = PidCatalog.get(tile.pidId);
+            Double value = LiveReadings.values.get(tile.pidId);
+            if (value == null && tile.pidId == PidCatalog.COMPUTED_ODOMETER && profile != null) {
                 value = profile.odometerMiles;
             }
-            TextView tv = entry.getValue();
-            tv.setTextSize(32);
-            tv.setTextColor(Color.parseColor(value != null ? "#F5F7FA" : "#52606D"));
-            if (value != null) {
-                entry.getValue().setText(def == null ? "--" : def.formatValue(value));
-            } else if (def != null && !def.computed && !supported.isEmpty() && !supported.contains(id)) {
-                // Truck has been scanned and confirmed it doesn't answer this one — say so
-                // instead of leaving it blank with no explanation.
-                tv.setTextSize(16);
-                tv.setTextColor(Color.parseColor("#E8A33D"));
-                entry.getValue().setText("Not supported");
+            // Truck has been scanned and confirmed it doesn't answer this one — say so
+            // instead of leaving it blank with no explanation.
+            boolean noAnswer = value == null && def != null && !def.computed
+                    && !supported.isEmpty() && !supported.contains(tile.pidId);
+            tile.label.setText(noAnswer ? tile.name + " · not supported" : tile.name);
+            tile.label.setTextColor(noAnswer ? cWarn : cMuted);
+
+            String text = value != null && def != null ? def.formatValue(value) : "--";
+            if (value != null) readings++;
+            if (tile.gauge != null) {
+                int color = cMuted;
+                if (value != null) {
+                    GaugeScale.Level level = GaugeScale.level(tile.pidId, value);
+                    if (level == GaugeScale.Level.CRITICAL) {
+                        critical++;
+                        color = cCrit;
+                    } else if (level == GaugeScale.Level.WATCH) {
+                        watch++;
+                        color = cWarn;
+                    } else {
+                        color = cOk;
+                    }
+                }
+                tile.gauge.setReading(value == null ? Double.NaN : value, text, color);
+                tile.gauge.setContentDescription(tile.name + " " + text + (def == null ? "" : " " + def.unit));
             } else {
-                entry.getValue().setText("--");
+                tile.value.setText(text);
+                tile.value.setTextColor(value != null ? cText : cMuted);
             }
         }
+        updateHealthChip(readings, watch, critical);
     }
 
-    /** Rebuilds the tile grid from the user's saved selection. */
-    private void rebuildTiles() {
-        gridTiles.removeAllViews();
-        tileValues.clear();
-        List<Integer> ids = AppSettings.getDashboardPids(this);
-        float density = getResources().getDisplayMetrics().density;
-        int pad = Math.round(12 * density);
-        int margin = Math.round(6 * density);
+    /** The summary chip in the status strip: worst state across the readings on screen. */
+    private void updateHealthChip(int readings, int watch, int critical) {
+        String text;
+        int color;
+        if (critical > 0) {
+            text = critical + " critical";
+            color = cCrit;
+        } else if (watch > 0) {
+            text = watch + " to watch";
+            color = cWarn;
+        } else if (readings > 0) {
+            text = "Running normal";
+            color = cOk;
+        } else {
+            text = TrackingService.isRunning ? "Waiting for data" : "Idle";
+            color = cMuted;
+        }
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(100));
+        bg.setColor((color & 0x00FFFFFF) | 0x33000000);
+        textHealth.setBackground(bg);
+        textHealth.setText(text);
+        textHealth.setTextColor(color);
+    }
 
+    /** Rebuilds the gauges from the user's saved selection. The first two gauges are shown large. */
+    private void rebuildTiles() {
+        gridHero.removeAllViews();
+        gridTiles.removeAllViews();
+        gridPlain.removeAllViews();
+        tiles.clear();
+
+        int size = AppSettings.getTileSize(this);
+        gridTiles.setColumnCount(size == 0 ? 4 : size == 1 ? 3 : 2);
+        buttonTileSize.setText("Size: " + (size == 0 ? "S" : size == 1 ? "M" : "L"));
+
+        int heroLeft = 2;
         boolean any = false;
-        for (int id : ids) {
+        for (int id : AppSettings.getDashboardPids(this)) {
             PidCatalog.Pid def = PidCatalog.get(id);
             if (def == null) continue;
             any = true;
 
-            LinearLayout tile = new LinearLayout(this);
-            tile.setOrientation(LinearLayout.VERTICAL);
-            tile.setPadding(pad, pad, pad, pad);
-            GradientDrawable card = new GradientDrawable();
-            card.setCornerRadius(14 * density);
-            card.setColor(Color.parseColor("#1F2933"));
-            card.setStroke(Math.max(1, Math.round(density)), Color.parseColor("#3E4C59"));
-            tile.setBackground(card);
-            tile.setElevation(3 * density);
-
-            TextView label = new TextView(this);
-            label.setText(def.label());
-            label.setTextSize(12);
-            label.setAllCaps(true);
-            label.setTextColor(Color.parseColor("#9AA5B1"));
-
-            TextView value = new TextView(this);
-            value.setText("--");
-            value.setTextSize(32);
-            value.setTextColor(Color.parseColor("#52606D"));
-            value.setTypeface(Typeface.DEFAULT_BOLD);
-
-            tile.addView(label);
-            tile.addView(value);
-
-            GridLayout.LayoutParams lp = new GridLayout.LayoutParams(
-                    GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f));
-            lp.width = 0;
-            lp.setMargins(margin, margin, margin, margin);
-            gridTiles.addView(tile, lp);
-            tileValues.put(id, value);
+            GaugeScale scale = GaugeScale.forPid(id);
+            Tile tile;
+            if (scale != null && heroLeft > 0) {
+                heroLeft--;
+                tile = buildGaugeTile(def, scale, true);
+                gridHero.addView(tile.root, gridParams());
+            } else if (scale != null) {
+                tile = buildGaugeTile(def, scale, false);
+                gridTiles.addView(tile.root, gridParams());
+            } else {
+                tile = buildPlainTile(def);
+                gridPlain.addView(tile.root, gridParams());
+            }
+            tiles.add(tile);
         }
 
         if (!any) {
             TextView hint = new TextView(this);
-            hint.setText("No readings selected — tap Choose Readings (PIDs) to pick some.");
-            gridTiles.addView(hint);
+            hint.setText("No readings selected — tap Edit readings to pick some.");
+            hint.setTextColor(cMuted);
+            gridPlain.addView(hint);
         }
+        updateTiles();
+    }
+
+    private Tile buildGaugeTile(PidCatalog.Pid def, GaugeScale scale, boolean hero) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.bg_card);
+        int pad = dp(hero ? 10 : 6);
+        root.setPadding(pad, pad, pad, pad);
+
+        ArcGaugeView gauge = new ArcGaugeView(this);
+        gauge.configure(scale, def.unit, hero);
+        root.addView(gauge, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView label = new TextView(this);
+        label.setTextSize(hero ? 11 : 10);
+        label.setAllCaps(true);
+        label.setLetterSpacing(0.06f);
+        label.setGravity(Gravity.CENTER);
+        label.setMaxLines(1);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setTextColor(cMuted);
+        root.addView(label, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return new Tile(def.id, def.name, gauge, null, label, root);
+    }
+
+    /** Readings with no normal range (trip distance, MPG, odometer) are shown as plain numbers. */
+    private Tile buildPlainTile(PidCatalog.Pid def) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.bg_card);
+        int pad = dp(10);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView label = new TextView(this);
+        label.setTextSize(11);
+        label.setAllCaps(true);
+        label.setLetterSpacing(0.06f);
+        label.setTextColor(cMuted);
+
+        TextView value = new TextView(this);
+        value.setText("--");
+        value.setTextSize(24);
+        value.setTypeface(Typeface.DEFAULT_BOLD);
+        value.setTextColor(cMuted);
+
+        root.addView(label);
+        root.addView(value);
+        return new Tile(def.id, def.label(), null, value, label, root);
+    }
+
+    private GridLayout.LayoutParams gridParams() {
+        GridLayout.LayoutParams lp = new GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f));
+        lp.width = 0;
+        int margin = dp(4);
+        lp.setMargins(margin, margin, margin, margin);
+        return lp;
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     /**
@@ -706,9 +840,22 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    /** The soonest-due service item that has been logged, for the Dashboard's service strip. */
+    private static String describeNextService(List<ServiceStatus> statuses) {
+        ServiceStatus next = null;
+        for (ServiceStatus status : statuses) {
+            if (!status.hasRecord) continue;
+            if (next == null || status.milesRemaining() < next.milesRemaining()) next = status;
+        }
+        if (next == null) return "No service logged yet. Tap to open History.";
+        if (next.overdue) return "Overdue: " + next.displayName;
+        return String.format(Locale.US, "Next: %s in %,.0f mi", next.displayName, next.milesRemaining());
+    }
+
     /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
         final boolean needServiceList = currentTab == TAB_HISTORY;
+        final boolean needDashboardStrip = currentTab == TAB_DASHBOARD;
         final boolean needKoeo = currentTab == TAB_DIAGNOSTICS;
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
@@ -716,9 +863,12 @@ public class MainActivity extends AppCompatActivity {
             lastProfile = profile;
 
             StringBuilder sb = new StringBuilder();
-            if (needServiceList) {
+            String nextService = null;
+            if (needServiceList || needDashboardStrip) {
                 List<ServiceStatus> statuses = MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao());
+                if (needDashboardStrip) nextService = describeNextService(statuses);
                 for (ServiceStatus status : statuses) {
+                    if (!needServiceList) break;
                     if (!status.hasRecord) {
                         sb.append(status.displayName).append("\n    No service logged yet — log the last one to track it\n");
                         continue;
@@ -728,6 +878,7 @@ public class MainActivity extends AppCompatActivity {
                             status.displayName, status.percentOfLifeUsed, status.milesRemaining(), flag));
                 }
             }
+            final String nextServiceText = nextService;
 
             StringBuilder koeoSb = new StringBuilder();
             if (needKoeo) {
@@ -743,6 +894,11 @@ public class MainActivity extends AppCompatActivity {
             final String koeoText = koeoSb.toString();
 
             uiHandler.post(() -> {
+                if (nextServiceText != null) {
+                    textDashOilPct.setText(String.format(Locale.US, "%.0f%%", profile.oilLifePercent));
+                    progressOil.setProgress((int) Math.round(Math.max(0, Math.min(100, profile.oilLifePercent))));
+                    textDashNextService.setText(nextServiceText);
+                }
                 textOilLife.setText(String.format(Locale.US, "Oil life: %.0f%%", profile.oilLifePercent));
                 textOdometer.setText(profile.odometerMiles > 0
                         ? String.format(Locale.US, "Odometer: %,.1f mi", profile.odometerMiles)

@@ -24,6 +24,7 @@ public final class AppSettings {
     private static final String KEY_TRIP_TIME_ADDED = "trip_time_added";
     // Highest setup-wizard phase the user has finished (0 = none); see SetupWizardActivity.
     private static final String KEY_SETUP_PHASE_DONE = "setup_phase_done";
+    private static final String KEY_TILE_SIZE = "dashboard_tile_size";
     // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
     private static final int REMOVED_COOLANT_PID = 0x05;
 
@@ -78,9 +79,10 @@ public final class AppSettings {
         String stored = prefs(context).getString(KEY_DASHBOARD_PIDS, null);
         if (stored == null) {
             List<Integer> defaults = new ArrayList<>();
+            // The first two numeric readings get the large gauges.
+            defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.RPM);
             defaults.add(PidCatalog.SPEED);
-            defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MILES);
@@ -106,6 +108,15 @@ public final class AppSettings {
     public static void setDashboardPids(Context context, List<Integer> pids) {
         prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids))
                 .putBoolean(KEY_TRIP_TIME_ADDED, true).apply();
+    }
+
+    /** Dashboard gauge size: 0 small, 1 medium, 2 large. */
+    public static int getTileSize(Context context) {
+        return Math.max(0, Math.min(2, prefs(context).getInt(KEY_TILE_SIZE, 1)));
+    }
+
+    public static void setTileSize(Context context, int size) {
+        prefs(context).edit().putInt(KEY_TILE_SIZE, Math.max(0, Math.min(2, size))).apply();
     }
 
     public static Set<Integer> getSupportedPids(Context context) {

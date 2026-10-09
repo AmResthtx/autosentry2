@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -101,6 +102,8 @@ public class TrackingService extends Service {
     private static final long POLL_INTERVAL_MS = 250L;
     // Mid-trip link loss: retry as fast as the adapter allows (a failed connect already takes ~5 s).
     private static final long RETRY_INTERVAL_MS = 1000L;
+    // Truck off: one knock this often. Covers the 7.3L's glow-plug wait between key-on and crank.
+    private static final long IDLE_CHECK_INTERVAL_MS = 15_000L;
     private static final long PERSIST_INTERVAL_MS = 1000L;
     private static final long END_TRIP_AFTER_ENGINE_OFF_MS = 120_000L;
     // A longer gap than this (reconnect, stall) is not driving time; don't bill it to the trip.
@@ -391,8 +394,8 @@ public class TrackingService extends Service {
     }
 
     /**
-     * Low-power mode while the truck is off: drop the adapter link so it can sleep, stop GPS,
-     * release the wake lock, and wait for a wake event (see wakeFromIdle) instead of polling.
+     * Low-power mode until the next knock: drop the adapter link so it can sleep, stop GPS,
+     * release the wake lock, and let an exact alarm wake the tablet for the next check.
      */
     private void waitForKeyOn() {
         finishKoeo(); // key cycle over: keep whatever the crank showed (or that it never cranked)
@@ -408,9 +411,24 @@ public class TrackingService extends Service {
         updateNotification("Waiting for key-on");
         mainHandler.post(this::stopGps);
 
-        // No timer: with the truck off there is nothing to reconnect to, so don't spend battery
-        // knocking. Power connected, screen on, unlock, or opening the app ends the wait.
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        boolean exactAllowed = alarms != null
+                && (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms());
+        if (!exactAllowed) {
+            // Without exact alarms nothing wakes a sleeping tablet on time, so stay awake
+            // and knock on a timer rather than miss key-on.
+            mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
         idleWaiting.set(true);
+        try {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + IDLE_CHECK_INTERVAL_MS, idleCheckIntent);
+        } catch (SecurityException e) {
+            // Permission pulled since the check; stay awake instead (unless a wake event already took over).
+            if (idleWaiting.compareAndSet(true, false)) mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
     }
 
@@ -543,6 +561,11 @@ public class TrackingService extends Service {
             boolean exempt = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
             ok &= testLine(r, exempt, "Background start allowed",
                     "Background start NOT allowed — Android can block key-on auto-start. Fix: Account > Allow background start");
+            AlarmManager alarms = getSystemService(AlarmManager.class);
+            testLine(r, Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                            || (alarms != null && alarms.canScheduleExactAlarms()),
+                    "Alarms allowed (low-power waiting while the truck is off)",
+                    "Alarms not allowed — the tablet stays awake while the truck is off. Fix: Account > Allow low-power waiting");
             testLine(r, gpsTracker.hasPermission(), "Location allowed (GPS fills OBD gaps)",
                     "Location not allowed — distance relies on the truck's speed only");
 

@@ -87,6 +87,7 @@ public class ELM327Adapter {
         inputStream = socket.getInputStream();
         outputStream = socket.getOutputStream();
         connected = true;
+        pcmHeaderSet = false;
 
         try {
             // Reset, echo off, linefeeds off, spaces off, headers off, protocol AUTO.
@@ -249,6 +250,28 @@ public class ELM327Adapter {
         return data;
     }
 
+
+    /** One raw command and its raw reply, for discovery and debugging. */
+    public synchronized String rawCommand(String cmd, long timeoutMs) throws IOException {
+        return command(cmd, timeoutMs);
+    }
+
+    private boolean pcmHeaderSet = false;
+
+    /** Raw request addressed to the PCM; the header stays on the PCM until {@link #restoreObdHeader}. */
+    public synchronized String askPcm(String request, long timeoutMs) throws IOException {
+        if (!pcmHeaderSet) {
+            command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+            pcmHeaderSet = true;
+        }
+        return command(request, timeoutMs);
+    }
+
+    /** Back to the functional OBD header that Mode 01 needs. */
+    public synchronized void restoreObdHeader() throws IOException {
+        pcmHeaderSet = false;
+        command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
+    }
 
     /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
     public synchronized String lastEnhancedReply() {

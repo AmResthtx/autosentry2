@@ -91,7 +91,7 @@ public class MainActivity extends AppCompatActivity {
             textKoeoReports;
     private Button buttonEditDashboard, buttonToggleTracking, buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
+            buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck, buttonDiscovery,
             buttonSaveTrips;
 
     @Override
@@ -125,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
         buttonSetOdometer = findViewById(R.id.buttonSetOdometer);
         buttonTestConnection = findViewById(R.id.buttonTestConnection);
         buttonKoeoCheck = findViewById(R.id.buttonKoeoCheck);
+        buttonDiscovery = findViewById(R.id.buttonDiscovery);
         textKoeoReports = findViewById(R.id.textKoeoReports);
         buttonSaveTrips = findViewById(R.id.buttonSaveTrips);
         if (getSupportActionBar() != null) {
@@ -157,6 +158,7 @@ public class MainActivity extends AppCompatActivity {
         buttonSetOdometer.setOnClickListener(v -> promptSetOdometer());
         buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
         buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
+        buttonDiscovery.setOnClickListener(v -> withRequiredPermissions(this::showDiscovery));
         buttonSaveTrips.setOnClickListener(v -> saveTripsToTablet());
 
         rebuildTiles();
@@ -355,6 +357,12 @@ public class MainActivity extends AppCompatActivity {
         showServiceReport("Key-on engine-off check", TrackingService.ACTION_RUN_KOEO,
                 "Reading the truck… keep the key ON, engine off");
         lastDbRefresh = 0;
+    }
+
+    /** Raw Mode 01 / Mode 22 answers from the truck, saved to the tablet; a few minutes, key ON. */
+    private void showDiscovery() {
+        showServiceReport("Truck discovery", TrackingService.ACTION_RUN_DISCOVERY,
+                "Starting truck discovery… keep the key ON");
     }
 
     /** Runs {@code action} in the service and shows its LiveReadings.testReport as it fills in. */

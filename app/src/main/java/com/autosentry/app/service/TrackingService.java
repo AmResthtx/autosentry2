@@ -42,6 +42,7 @@ import com.autosentry.app.obd.DTCReader;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
+import com.autosentry.app.obd.TruckDiscovery;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
 import com.autosentry.app.util.TabletFiles;
@@ -94,6 +95,8 @@ public class TrackingService extends Service {
     public static final String ACTION_RUN_TEST = "com.autosentry.app.RUN_CONNECTION_TEST";
     /** Takes a key-on-engine-off snapshot now (key ON, engine off); report goes to LiveReadings.testReport. */
     public static final String ACTION_RUN_KOEO = "com.autosentry.app.RUN_KOEO_CHECK";
+    /** Asks the truck what it answers (raw Mode 01 and Mode 22 sweep) and saves the report to the tablet. */
+    public static final String ACTION_RUN_DISCOVERY = "com.autosentry.app.RUN_TRUCK_DISCOVERY";
     private static final String ACTION_IDLE_CHECK = "com.autosentry.app.IDLE_CHECK";
 
     private static final long POLL_INTERVAL_MS = 250L;
@@ -134,9 +137,8 @@ public class TrackingService extends Service {
     private boolean fordOilTemp = false;
     private boolean pwmBus = false;
     private boolean canBus = false;
-    // This key cycle's KOEO report: captured before cranking, saved again when the crank ends.
+    // KOEO report from "Run Key-On Check" (no-start diagnosis only, never automatic): saved again when the crank ends.
     private KoeoReport koeo;
-    private boolean koeoDue = false;
     private long crankStart = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
@@ -232,11 +234,13 @@ public class TrackingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         boolean runTest = intent != null && ACTION_RUN_TEST.equals(intent.getAction());
         boolean runKoeo = intent != null && ACTION_RUN_KOEO.equals(intent.getAction());
+        boolean runDiscovery = intent != null && ACTION_RUN_DISCOVERY.equals(intent.getAction());
         if (started) {
             // Already running; a second start must not spawn a second poll loop.
             if (runTest) queueConnectionTest();
             if (runKoeo) queueKoeoCheck();
-            if (runTest || runKoeo || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
+            if (runDiscovery) queueDiscovery();
+            if (runTest || runKoeo || runDiscovery || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
             return START_STICKY;
         }
         started = true;
@@ -251,13 +255,13 @@ public class TrackingService extends Service {
             // Android refused the foreground service (missing permission or background start).
             AppLog.e(this, TAG, "Could not start foreground service", e);
             stopReason = "Couldn't start tracking: " + e.getMessage();
-            if (runTest || runKoeo) endTestEarly("✗ " + stopReason);
+            if (runTest || runKoeo || runDiscovery) endTestEarly("✗ " + stopReason);
             stopSelf();
             return START_NOT_STICKY;
         }
         if (adapterAddress == null || adapterAddress.isEmpty()) {
             stopReason = "No OBD adapter paired — tap Pair OBD Adapter in Account";
-            if (runTest || runKoeo) endTestEarly("✗ No OBD adapter paired — tap Pair OBD Adapter first.");
+            if (runTest || runKoeo || runDiscovery) endTestEarly("✗ No OBD adapter paired — tap Pair OBD Adapter first.");
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -268,6 +272,7 @@ public class TrackingService extends Service {
         ioExecutor.execute(this::initState);
         if (runTest) queueConnectionTest();
         if (runKoeo) queueKoeoCheck();
+        if (runDiscovery) queueDiscovery();
         return START_STICKY;
     }
 
@@ -444,8 +449,10 @@ public class TrackingService extends Service {
         supportedPids = Collections.emptySet();
         try {
             realAdapter.connect();
-            AppLog.i(this, TAG, "OBD adapter connected"
-                    + (connectFailures > 0 ? " after " + connectFailures + " attempts" : ""));
+            // Every 15 s key-on knock with the truck off connects too; "Truck answered" marks real contact.
+            if (connectFailures > 0) {
+                AppLog.i(this, TAG, "OBD adapter connected after " + connectFailures + " attempts");
+            }
             connectFailures = 0;
             lastConnectError = null;
             return true;
@@ -497,7 +504,6 @@ public class TrackingService extends Service {
         String upper = protocol.toUpperCase(java.util.Locale.US);
         pwmBus = upper.contains("PWM");
         canBus = upper.contains("CAN") || upper.contains("15765");
-        if (koeo == null) koeoDue = true; // fresh truck contact: snapshot it if the engine isn't running yet
         probeFordOilTemp();
         AppLog.i(this, TAG, "Truck answered on " + protocol
                 + "; supported PIDs: " + describePids(found)
@@ -630,15 +636,10 @@ public class TrackingService extends Service {
     }
 
     /**
-     * KOEO: the first look at the truck in a key cycle, before the engine turns, gets a
-     * snapshot. After that, RPM between 0 and STARTED_RPM is cranking: time it and track
-     * the lowest battery voltage until the engine starts or the crank gives up.
+     * After an on-demand KOEO check, RPM between 0 and STARTED_RPM is cranking: time it and
+     * track the lowest battery voltage until the engine starts or the crank gives up.
      */
     private void trackKeyOnAndCrank(long now, Double rpm, boolean engineRunning) throws IOException {
-        if (koeoDue) {
-            koeoDue = false;
-            if (!engineRunning) captureKoeo(now); // already running = joined mid-drive, nothing to capture
-        }
         if (koeo == null || koeo.started || rpm == null) return; // no RPM answer this tick: no information
         if (rpm > 0 && rpm < STARTED_RPM) {
             if (crankStart == 0) {
@@ -704,6 +705,52 @@ public class TrackingService extends Service {
         crankStart = 0;
     }
 
+    private void queueDiscovery() {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = "Starting truck discovery…";
+        try {
+            ioExecutor.execute(this::runDiscovery);
+        } catch (RejectedExecutionException e) {
+            endTestEarly("✗ Tracking is shutting down — try again.");
+        }
+    }
+
+    /**
+     * Raw Mode 01 and Mode 22 answers from the truck, saved to Downloads/AutoSentry. Takes a
+     * few minutes and holds the adapter, so live readings pause until it finishes. Key ON.
+     */
+    private void runDiscovery() {
+        TruckDiscovery discovery = new TruckDiscovery(realAdapter,
+                text -> LiveReadings.testReport = text, () -> stopped);
+        String tail = "";
+        try {
+            if (!ensureConnected() || !ensureTruckAnswering()) {
+                LiveReadings.testReport = "✗ Truck not answering. Turn the key to ON (engine off is fine) and run it again.";
+                return;
+            }
+            discovery.run();
+            tail = "\nDone.";
+        } catch (IOException | RuntimeException e) {
+            tail = "\n✗ Stopped early: " + e.getMessage();
+            handleLinkLoss();
+        } finally {
+            String report = discovery.report();
+            if (!report.isEmpty()) {
+                try {
+                    String where = TabletFiles.save(this, "discovery_"
+                            + new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US)
+                            .format(new java.util.Date()) + ".txt", report + tail);
+                    tail += "\nSaved to " + where;
+                } catch (IOException e) {
+                    tail += "\n(couldn't save the file: " + e.getMessage() + ")";
+                }
+                AppLog.i(this, TAG, "Truck discovery finished" + tail.replace('\n', ' '));
+                LiveReadings.testReport = report + tail;
+            }
+            LiveReadings.testRunning = false;
+        }
+    }
+
     private void queueKoeoCheck() {
         LiveReadings.testRunning = true;
         LiveReadings.testReport = "Checking…";
@@ -734,7 +781,6 @@ public class TrackingService extends Service {
                 r.append("✗ Engine is running. Shut it off, leave the key ON, and run the check again.");
                 return;
             }
-            koeoDue = false;
             captureKoeo(System.currentTimeMillis());
             r.append(koeo.summary()).append("\n\nCrank whenever you're ready — the start is timed and saved.");
         } catch (IOException | RuntimeException e) {

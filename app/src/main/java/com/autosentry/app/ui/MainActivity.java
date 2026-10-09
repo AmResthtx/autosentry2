@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -40,6 +39,7 @@ import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
+import com.autosentry.app.diagnostics.PidToleranceEngine;
 import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
 import com.autosentry.app.maintenance.ServiceItemType;
 import com.autosentry.app.maintenance.ServiceStatus;
@@ -52,6 +52,7 @@ import com.autosentry.app.util.TabletFiles;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -108,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
     private View[] tabViews;
     private TextView[] tabButtons;
     private int cOk, cWarn, cCrit, cText, cMuted;
-    private TextView textHealth, textDashOilPct, textDashNextService;
+    private TextView textHealth, textDashOilPct, textDashNextService, textAlert;
     private ProgressBar progressOil;
     private Button buttonTileSize;
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList,
@@ -135,6 +136,7 @@ public class MainActivity extends AppCompatActivity {
         gridTiles = findViewById(R.id.gridTiles);
         gridPlain = findViewById(R.id.gridPlain);
         textHealth = findViewById(R.id.textHealth);
+        textAlert = findViewById(R.id.textAlert);
         textDashOilPct = findViewById(R.id.textDashOilPct);
         textDashNextService = findViewById(R.id.textDashNextService);
         progressOil = findViewById(R.id.progressOil);
@@ -165,8 +167,10 @@ public class MainActivity extends AppCompatActivity {
         textKoeoReports = findViewById(R.id.textKoeoReports);
         buttonSaveTrips = findViewById(R.id.buttonSaveTrips);
         if (getSupportActionBar() != null) {
-            getSupportActionBar().setSubtitle("v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")");
+            getSupportActionBar().hide(); // the dashboard has its own brand bar
         }
+        ((TextView) findViewById(R.id.textVersion))
+                .setText("v" + BuildConfig.VERSION_NAME + " · build " + BuildConfig.VERSION_CODE);
 
         if (savedInstanceState == null) {
             // A fresh install gets the wizard, which asks for permissions itself, step by step.
@@ -627,6 +631,9 @@ public class MainActivity extends AppCompatActivity {
         Set<Integer> supported = LiveReadings.supported;
         VehicleProfile profile = lastProfile;
         int readings = 0, watch = 0, critical = 0;
+        PidCatalog.Pid worstDef = null;
+        double worstValue = 0;
+        GaugeScale.Level worstLevel = GaugeScale.Level.OK;
         for (Tile tile : tiles) {
             PidCatalog.Pid def = PidCatalog.get(tile.pidId);
             Double value = LiveReadings.values.get(tile.pidId);
@@ -646,14 +653,18 @@ public class MainActivity extends AppCompatActivity {
                 int color = cMuted;
                 if (value != null) {
                     GaugeScale.Level level = GaugeScale.level(tile.pidId, value);
+                    color = cText;
                     if (level == GaugeScale.Level.CRITICAL) {
                         critical++;
                         color = cCrit;
                     } else if (level == GaugeScale.Level.WATCH) {
                         watch++;
                         color = cWarn;
-                    } else {
-                        color = cOk;
+                    }
+                    if (level.ordinal() > worstLevel.ordinal()) {
+                        worstLevel = level;
+                        worstDef = def;
+                        worstValue = value;
                     }
                 }
                 tile.gauge.setReading(value == null ? Double.NaN : value, text, color);
@@ -664,6 +675,25 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         updateHealthChip(readings, watch, critical);
+        updateAlert(worstDef, worstValue, worstLevel);
+    }
+
+    /** One line under the status strip naming the reading that is furthest out of range. */
+    private void updateAlert(PidCatalog.Pid def, double value, GaugeScale.Level level) {
+        if (def == null || level == GaugeScale.Level.OK) {
+            textAlert.setVisibility(View.GONE);
+            return;
+        }
+        int color = level == GaugeScale.Level.CRITICAL ? cCrit : cWarn;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(8));
+        bg.setColor((color & 0x00FFFFFF) | 0x26000000);
+        bg.setStroke(Math.max(1, dp(1)), (color & 0x00FFFFFF) | 0x80000000);
+        textAlert.setBackground(bg);
+        textAlert.setTextColor(color);
+        textAlert.setText((level == GaugeScale.Level.CRITICAL ? "CRITICAL  " : "WATCH  ")
+                + def.name + ": " + PidToleranceEngine.explainAnomaly(def.id, value));
+        textAlert.setVisibility(View.VISIBLE);
     }
 
     /** The summary chip in the status strip: worst state across the readings on screen. */
@@ -722,6 +752,10 @@ public class MainActivity extends AppCompatActivity {
                 tile = buildPlainTile(def);
                 gridPlain.addView(tile.root, gridParams());
             }
+            tile.root.setOnLongClickListener(v -> {
+                showTileMenu(id);
+                return true;
+            });
             tiles.add(tile);
         }
 
@@ -732,6 +766,34 @@ public class MainActivity extends AppCompatActivity {
             gridPlain.addView(hint);
         }
         updateTiles();
+    }
+
+    /** Hold a gauge: make it large, move it, or take it off the dashboard. */
+    private void showTileMenu(int pidId) {
+        PidCatalog.Pid def = PidCatalog.get(pidId);
+        if (def == null) return;
+        String[] items = {"Make large (move to front)", "Move earlier", "Move later", "Remove from dashboard"};
+        new AlertDialog.Builder(this)
+                .setTitle(def.name)
+                .setItems(items, (dialog, which) -> {
+                    List<Integer> ids = new ArrayList<>(AppSettings.getDashboardPids(this));
+                    int i = ids.indexOf(pidId);
+                    if (i < 0) return;
+                    if (which == 0) {
+                        ids.remove(i);
+                        ids.add(0, pidId);
+                    } else if (which == 1 && i > 0) {
+                        Collections.swap(ids, i, i - 1);
+                    } else if (which == 2 && i < ids.size() - 1) {
+                        Collections.swap(ids, i, i + 1);
+                    } else if (which == 3) {
+                        ids.remove(i);
+                    }
+                    AppSettings.setDashboardPids(this, ids);
+                    rebuildTiles();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private Tile buildGaugeTile(PidCatalog.Pid def, GaugeScale scale, boolean hero) {
@@ -747,9 +809,10 @@ public class MainActivity extends AppCompatActivity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView label = new TextView(this);
-        label.setTextSize(hero ? 11 : 10);
+        label.setTextSize(hero ? 10 : 9);
+        label.setTypeface(Typeface.MONOSPACE);
         label.setAllCaps(true);
-        label.setLetterSpacing(0.06f);
+        label.setLetterSpacing(0.08f);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(1);
         label.setEllipsize(TextUtils.TruncateAt.END);
@@ -763,24 +826,27 @@ public class MainActivity extends AppCompatActivity {
     private Tile buildPlainTile(PidCatalog.Pid def) {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundResource(R.drawable.bg_card);
-        int pad = dp(10);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        int pad = dp(8);
         root.setPadding(pad, pad, pad, pad);
 
         TextView label = new TextView(this);
-        label.setTextSize(11);
+        label.setTextSize(9);
+        label.setTypeface(Typeface.MONOSPACE);
         label.setAllCaps(true);
-        label.setLetterSpacing(0.06f);
+        label.setLetterSpacing(0.08f);
+        label.setGravity(Gravity.CENTER);
         label.setTextColor(cMuted);
 
         TextView value = new TextView(this);
         value.setText("--");
         value.setTextSize(24);
-        value.setTypeface(Typeface.DEFAULT_BOLD);
+        value.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        value.setGravity(Gravity.CENTER);
         value.setTextColor(cMuted);
 
-        root.addView(label);
         root.addView(value);
+        root.addView(label);
         return new Tile(def.id, def.label(), null, value, label, root);
     }
 

@@ -77,6 +77,9 @@ public final class PidToleranceEngine {
         // Engine oil temp: normal 180–220°F, critical > 240°F = overheat, < 120°F = not warmed
         tol(0x5C, "Engine Oil Temp", 120, 220, 80, 260, "°F");
         
+        // Coolant temp: 7.3L thermostat opens near 190°F; sustained > 230°F = cooling system trouble
+        tol(0x05, "Engine Coolant Temp", 160, 215, -40, 245, "°F");
+
         // Barometric pressure: 14–15 psi at sea level, ~12 psi at altitude
         // Below 10 or above 16 = sensor error
         tol(0x33, "Barometric Pressure", 10, 16, 8, 20, "psi");

@@ -111,6 +111,8 @@ public class TrackingService extends Service {
     private static final long OIL_PROBE_RETRY_MS = 30_000L;
     // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
     private static final long OIL_READ_INTERVAL_MS = 2_000L;
+    // ICP/IPR (Ford Mode 22) are read only while one is on the dashboard, with the same header-switch cost.
+    private static final long ICP_READ_INTERVAL_MS = 1_000L;
     // GPS below this is parked jitter, not driving.
     private static final double GPS_MOVING_MPH = 3.0;
     private static final double STARTED_RPM = EngineWatch.RUNNING_RPM;
@@ -140,6 +142,7 @@ public class TrackingService extends Service {
     private long crankStart = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
+    private long lastIcpRead = 0;
     // Avoids re-notifying every tick once an item crosses 80%; cleared
     // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
@@ -516,6 +519,10 @@ public class TrackingService extends Service {
                 && !Double.isNaN(realAdapter.readFordEngineOilTempC());
         Set<Integer> offered = new LinkedHashSet<>(supportedPids);
         if (fordOilTemp) offered.add(PidCatalog.ENGINE_OIL_TEMP);
+        if (pwmBus) {
+            offered.add(PidCatalog.FORD_ICP);
+            offered.add(PidCatalog.FORD_IPR);
+        }
         LiveReadings.supported = offered;
         AppSettings.setSupportedPids(this, offered);
     }
@@ -792,6 +799,14 @@ public class TrackingService extends Service {
             }
         }
 
+        if (pwmBus && (want.contains(PidCatalog.FORD_ICP) || want.contains(PidCatalog.FORD_IPR))
+                && now - lastIcpRead >= ICP_READ_INTERVAL_MS) {
+            lastIcpRead = now;
+            double[] icpIpr = realAdapter.readFordIcpIpr();
+            putOrRemove(PidCatalog.FORD_ICP, icpIpr[0]);
+            putOrRemove(PidCatalog.FORD_IPR, icpIpr[1]);
+        }
+
         lastConnectedTimestamp = now;
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
         Double obdSpeed = LiveReadings.values.get(PidCatalog.SPEED);
@@ -882,6 +897,14 @@ public class TrackingService extends Service {
         if (now - lastPersistTimestamp >= PERSIST_INTERVAL_MS) {
             lastPersistTimestamp = now;
             persist(now, speedMph, rpm != null ? rpm : 0, maf != null ? maf : 0);
+        }
+    }
+
+    private static void putOrRemove(int id, double value) {
+        if (Double.isNaN(value)) {
+            LiveReadings.values.remove(id);
+        } else {
+            LiveReadings.values.put(id, value);
         }
     }
 

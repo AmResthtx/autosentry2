@@ -2,110 +2,11 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal">
-
-    <LinearLayout
-        android:layout_width="68dp"
-        android:layout_height="match_parent"
-        android:background="@color/rail_bg"
-        android:orientation="vertical"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp">
-
-        <TextView
-            android:id="@+id/buttonTabDashboard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_rail_item"
-            android:clickable="true"
-            android:focusable="true"
-            android:drawableTop="@drawable/ic_nav_dashboard"
-            android:drawableTint="@color/rail_item"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="Dashboard"
-            android:textColor="@color/rail_item"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/buttonTabDiagnostics"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_rail_item"
-            android:clickable="true"
-            android:focusable="true"
-            android:drawableTop="@drawable/ic_nav_checks"
-            android:drawableTint="@color/rail_item"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="Checks"
-            android:textColor="@color/rail_item"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/buttonTabService"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_rail_item"
-            android:clickable="true"
-            android:focusable="true"
-            android:drawableTop="@drawable/ic_nav_history"
-            android:drawableTint="@color/rail_item"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="History"
-            android:textColor="@color/rail_item"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/buttonTabDeals"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_rail_item"
-            android:clickable="true"
-            android:focusable="true"
-            android:drawableTop="@drawable/ic_nav_deals"
-            android:drawableTint="@color/rail_item"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="Deals"
-            android:textColor="@color/rail_item"
-            android:textSize="10sp" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:id="@+id/buttonTabAccount"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_rail_item"
-            android:clickable="true"
-            android:focusable="true"
-            android:drawableTop="@drawable/ic_nav_account"
-            android:drawableTint="@color/rail_item"
-            android:drawablePadding="4dp"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="Account"
-            android:textColor="@color/rail_item"
-            android:textSize="10sp" />
-    </LinearLayout>
+    android:orientation="vertical">
 
     <FrameLayout
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
         android:layout_weight="1">
 
         <!-- ================= DASHBOARD TAB ================= -->
@@ -135,13 +36,32 @@
                         android:layout_weight="1"
                         android:orientation="vertical">
 
-                        <TextView
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Dashboard"
-                            android:textColor="@color/dash_text"
-                            android:textSize="18sp"
-                            android:textStyle="bold" />
+                            android:gravity="bottom"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/textBrand"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-condensed"
+                                android:letterSpacing="0.2"
+                                android:text="AUTOSENTRY"
+                                android:textColor="@color/dash_text"
+                                android:textSize="18sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/textVersion"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:fontFamily="monospace"
+                                android:textColor="@color/dash_muted"
+                                android:textSize="10sp" />
+                        </LinearLayout>
 
                         <TextView
                             android:id="@+id/textLiveStatus"
@@ -223,6 +143,15 @@
                         android:textSize="13sp" />
                 </LinearLayout>
 
+                <TextView
+                    android:id="@+id/textAlert"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:padding="10dp"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
                 <GridLayout
                     android:id="@+id/gridHero"
                     android:layout_width="match_parent"
@@ -240,7 +169,17 @@
                     android:id="@+id/gridPlain"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:columnCount="2" />
+                    android:columnCount="3" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:text="Hold a gauge to make it large, move it or remove it"
+                    android:textColor="@color/dash_muted"
+                    android:textSize="10sp" />
 
                 <!-- Service strip: taps through to History -->
                 <LinearLayout
@@ -530,4 +469,110 @@
             </LinearLayout>
         </ScrollView>
     </FrameLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/dock_bg"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/buttonTabDashboard"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dock_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_dashboard"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="3dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.08"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="DASH"
+            android:textColor="@color/rail_item"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/buttonTabDiagnostics"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dock_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_checks"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="3dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.08"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="CHECKS"
+            android:textColor="@color/rail_item"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/buttonTabService"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dock_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_history"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="3dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.08"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="HISTORY"
+            android:textColor="@color/rail_item"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/buttonTabDeals"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dock_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_deals"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="3dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.08"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="DEALS"
+            android:textColor="@color/rail_item"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/buttonTabAccount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dock_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_account"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="3dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.08"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="ACCOUNT"
+            android:textColor="@color/rail_item"
+            android:textSize="9sp" />
+    </LinearLayout>
 </LinearLayout>

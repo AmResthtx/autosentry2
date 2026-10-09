@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cockpit look for every screen: charcoal, warm white, one orange accent. -->
+    <style name="Theme.AutoSentry" parent="Theme.AppCompat">
+        <item name="colorPrimary">@color/dock_bg</item>
+        <item name="colorPrimaryDark">@color/dock_bg</item>
+        <item name="colorAccent">@color/dash_accent</item>
+        <item name="colorButtonNormal">@color/dash_track</item>
+        <item name="android:windowBackground">@color/dash_surface</item>
+        <item name="android:textColorPrimary">@color/dash_text</item>
+        <item name="android:textColorSecondary">@color/dash_muted</item>
+        <item name="android:statusBarColor">@color/dock_bg</item>
+        <item name="android:navigationBarColor">@color/dock_bg</item>
+    </style>
+</resources>

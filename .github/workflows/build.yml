@@ -73,6 +73,7 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/autosentry-release.jks"
 
       - name: Build release APK
+        if: github.event_name == 'push' && github.ref_type == 'branch'
         env:
           AUTOSENTRY_RELEASE_STORE_FILE: ${{ runner.temp }}/autosentry-release.jks
           AUTOSENTRY_RELEASE_STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}

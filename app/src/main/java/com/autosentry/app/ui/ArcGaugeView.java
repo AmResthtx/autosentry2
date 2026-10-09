@@ -11,53 +11,67 @@ import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.R;
 
+import java.util.Locale;
+
 /**
- * A 270 degree arc gauge: a faint green band marks the normal range, the arc fills to the
- * current value in the status color, and the value and unit sit in the middle.
- * Square; takes its height from its width.
+ * An instrument-cluster dial: ticks over a 270 degree sweep, a red zone beyond the normal
+ * range, an orange needle, and the value and unit under the hub. The value takes the
+ * status color. Square; takes its height from its width.
  */
 public class ArcGaugeView extends View {
     private static final float START_ANGLE = 135f;
     private static final float SWEEP = 270f;
+    private static final int TICK_INTERVALS = 20;
 
-    private final Paint trackPaint = ring();
-    private final Paint bandPaint = ring();
-    private final Paint valuePaint = ring();
-    private final Paint valueText = text(Typeface.DEFAULT_BOLD);
-    private final Paint unitText = text(Typeface.DEFAULT);
-    private final Paint scaleText = text(Typeface.DEFAULT);
-    private final RectF arcBounds = new RectF();
+    private final Paint facePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint ringPaint = stroke();
+    private final Paint redPaint = stroke();
+    private final Paint tickPaint = stroke();
+    private final Paint redTickPaint = stroke();
+    private final Paint needlePaint = stroke();
+    private final Paint hubPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint hubRingPaint = stroke();
+    private final Paint valueText = text(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+    private final Paint unitText = text(Typeface.MONOSPACE);
+    private final Paint numeralText = text(Typeface.MONOSPACE);
+    private final RectF redBounds = new RectF();
 
     private GaugeScale scale;
     private String unit = "";
-    private boolean showScale;
+    private boolean showNumerals;
     private double value = Double.NaN;
     private String valueLabel = "--";
-    private int levelColor;
+    private int valueColor;
 
     public ArcGaugeView(Context context) {
         super(context);
-        trackPaint.setColor(ContextCompat.getColor(context, R.color.dash_track));
-        bandPaint.setColor(ContextCompat.getColor(context, R.color.dash_band));
-        valueText.setColor(ContextCompat.getColor(context, R.color.dash_text));
+        facePaint.setColor(ContextCompat.getColor(context, R.color.dial_face));
+        ringPaint.setColor(ContextCompat.getColor(context, R.color.dial_ring));
+        redPaint.setColor(ContextCompat.getColor(context, R.color.dash_redline));
+        tickPaint.setColor(ContextCompat.getColor(context, R.color.dial_tick));
+        redTickPaint.setColor(ContextCompat.getColor(context, R.color.dash_crit));
+        needlePaint.setColor(ContextCompat.getColor(context, R.color.dash_accent));
+        needlePaint.setStrokeCap(Paint.Cap.ROUND);
+        hubPaint.setColor(ContextCompat.getColor(context, R.color.dock_bg));
+        hubRingPaint.setColor(ContextCompat.getColor(context, R.color.dial_ring));
         unitText.setColor(ContextCompat.getColor(context, R.color.dash_muted));
-        scaleText.setColor(ContextCompat.getColor(context, R.color.dash_muted));
-        levelColor = ContextCompat.getColor(context, R.color.dash_muted);
+        numeralText.setColor(ContextCompat.getColor(context, R.color.dial_numeral));
+        valueColor = ContextCompat.getColor(context, R.color.dash_muted);
     }
 
-    /** {@code showScale} adds the min and max labels under the arc ends (for the large gauges). */
-    public void configure(GaugeScale scale, String unit, boolean showScale) {
+    /** {@code showNumerals} labels the major ticks (for the large dials). */
+    public void configure(GaugeScale scale, String unit, boolean showNumerals) {
         this.scale = scale;
         this.unit = unit == null ? "" : unit;
-        this.showScale = showScale;
+        this.showNumerals = showNumerals;
         invalidate();
     }
 
-    /** {@code value} NaN draws just the track and {@code label}. */
+    /** {@code value} NaN hides the needle and shows just {@code label}. */
     public void setReading(double value, String label, int color) {
         this.value = value;
         this.valueLabel = label;
-        this.levelColor = color;
+        this.valueColor = color;
         invalidate();
     }
 
@@ -73,51 +87,73 @@ public class ArcGaugeView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         float size = Math.min(getWidth(), getHeight());
-        float stroke = size * 0.11f;
-        float inset = stroke / 2f + size * 0.04f;
-        arcBounds.set(inset, inset, size - inset, size - inset);
-        trackPaint.setStrokeWidth(stroke);
-        bandPaint.setStrokeWidth(stroke);
-        valuePaint.setStrokeWidth(stroke * 0.6f);
+        float c = size / 2f;
 
-        canvas.drawArc(arcBounds, START_ANGLE, SWEEP, false, trackPaint);
+        ringPaint.setStrokeWidth(size * 0.016f);
+        canvas.drawCircle(c, c, size * 0.47f, facePaint);
+        canvas.drawCircle(c, c, size * 0.47f, ringPaint);
+
         if (scale != null) {
-            float from = (float) scale.fraction(scale.normalMin);
-            float to = (float) scale.fraction(scale.normalMax);
-            if (to > from) {
-                canvas.drawArc(arcBounds, START_ANGLE + SWEEP * from, SWEEP * (to - from), false, bandPaint);
+            float redFrom = scale.hasNormalRange() ? (float) scale.fraction(scale.normalMax) : 1f;
+            if (redFrom < 1f) {
+                redPaint.setStrokeWidth(size * 0.028f);
+                float r = size * 0.435f;
+                redBounds.set(c - r, c - r, c + r, c + r);
+                canvas.drawArc(redBounds, START_ANGLE + SWEEP * redFrom, SWEEP * (1f - redFrom), false, redPaint);
             }
-            double fraction = scale.fraction(value);
-            if (!Double.isNaN(value) && fraction > 0) {
-                valuePaint.setColor(levelColor);
-                canvas.drawArc(arcBounds, START_ANGLE, SWEEP * (float) fraction, false, valuePaint);
+            for (int i = 0; i <= TICK_INTERVALS; i++) {
+                float f = i / (float) TICK_INTERVALS;
+                boolean major = i % 5 == 0;
+                Paint paint = f >= redFrom && redFrom < 1f ? redTickPaint : tickPaint;
+                paint.setStrokeWidth(size * (major ? 0.016f : 0.009f));
+                float inner = size * (major ? 0.335f : 0.37f);
+                drawRadial(canvas, c, f, inner, size * 0.405f, paint);
+            }
+            if (showNumerals) {
+                numeralText.setTextSize(size * 0.068f);
+                for (double v : scale.majorTicks()) {
+                    float[] p = point(c, (float) scale.fraction(v), size * 0.265f);
+                    canvas.drawText(format(v), p[0], p[1] + size * 0.024f, numeralText);
+                }
+            }
+            if (!Double.isNaN(value)) {
+                float f = (float) scale.fraction(value);
+                needlePaint.setStrokeWidth(size * 0.026f);
+                drawRadial(canvas, c, f, -size * 0.07f, size * 0.36f, needlePaint);
             }
         }
+        hubRingPaint.setStrokeWidth(size * 0.012f);
+        canvas.drawCircle(c, c, size * 0.05f, hubPaint);
+        canvas.drawCircle(c, c, size * 0.05f, hubRingPaint);
 
-        float cx = size / 2f;
-        valueText.setTextSize(size * 0.24f);
-        float maxWidth = size * 0.62f;
+        valueText.setColor(valueColor);
+        valueText.setTextSize(size * 0.17f);
+        float maxWidth = size * 0.6f;
         float textWidth = valueText.measureText(valueLabel);
         if (textWidth > maxWidth) valueText.setTextSize(valueText.getTextSize() * maxWidth / textWidth);
-        canvas.drawText(valueLabel, cx, size * 0.54f, valueText);
-        unitText.setTextSize(size * 0.1f);
-        canvas.drawText(unit, cx, size * 0.68f, unitText);
+        canvas.drawText(valueLabel, c, size * 0.79f, valueText);
+        unitText.setTextSize(size * 0.06f);
+        canvas.drawText(unit, c, size * 0.885f, unitText);
+    }
 
-        if (showScale && scale != null) {
-            scaleText.setTextSize(size * 0.075f);
-            canvas.drawText(format(scale.min), size * 0.22f, size * 0.97f, scaleText);
-            canvas.drawText(format(scale.max), size * 0.78f, size * 0.97f, scaleText);
-        }
+    private static float[] point(float c, float fraction, float radius) {
+        double angle = Math.toRadians(START_ANGLE + SWEEP * fraction);
+        return new float[]{c + (float) (radius * Math.cos(angle)), c + (float) (radius * Math.sin(angle))};
+    }
+
+    private static void drawRadial(Canvas canvas, float c, float fraction, float from, float to, Paint paint) {
+        float[] a = point(c, fraction, from);
+        float[] b = point(c, fraction, to);
+        canvas.drawLine(a[0], a[1], b[0], b[1], paint);
     }
 
     private static String format(double v) {
-        return Math.abs(v - Math.rint(v)) < 1e-9 ? String.valueOf((long) Math.rint(v)) : String.valueOf(v);
+        return Math.abs(v - Math.rint(v)) < 1e-9 ? String.valueOf((long) Math.rint(v)) : String.format(Locale.US, "%.1f", v);
     }
 
-    private static Paint ring() {
+    private static Paint stroke() {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeCap(Paint.Cap.ROUND);
         return p;
     }
 

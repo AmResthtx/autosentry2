@@ -25,8 +25,6 @@ public final class AppSettings {
     // Highest setup-wizard phase the user has finished (0 = none); see SetupWizardActivity.
     private static final String KEY_SETUP_PHASE_DONE = "setup_phase_done";
     private static final String KEY_TILE_SIZE = "dashboard_tile_size";
-    // Standard coolant-temp PID, replaced on the dashboard by engine oil temp.
-    private static final int REMOVED_COOLANT_PID = 0x05;
 
     private AppSettings() {}
 
@@ -82,6 +80,10 @@ public final class AppSettings {
             // The first two numeric readings get the large gauges.
             defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.RPM);
+            defaults.add(0x0B);  // boost
+            defaults.add(0x42);  // battery volts
+            defaults.add(0x0F);  // intake air temp
+            defaults.add(0x2F);  // fuel level
             defaults.add(PidCatalog.SPEED);
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
@@ -90,14 +92,6 @@ public final class AppSettings {
             return defaults;
         }
         List<Integer> ids = parseIds(stored);
-        int coolant = ids.indexOf(REMOVED_COOLANT_PID);
-        if (coolant >= 0) {
-            if (ids.contains(PidCatalog.ENGINE_OIL_TEMP)) {
-                ids.remove(coolant);
-            } else {
-                ids.set(coolant, PidCatalog.ENGINE_OIL_TEMP);
-            }
-        }
         if (!prefs(context).getBoolean(KEY_TRIP_TIME_ADDED, false)) {
             if (!ids.contains(PidCatalog.COMPUTED_TRIP_TIME)) ids.add(PidCatalog.COMPUTED_TRIP_TIME);
             setDashboardPids(context, ids);

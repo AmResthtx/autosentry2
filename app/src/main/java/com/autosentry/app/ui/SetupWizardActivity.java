@@ -392,7 +392,7 @@ public class SetupWizardActivity extends AppCompatActivity {
     private void renderReadings() {
         Set<Integer> supported = !LiveReadings.supported.isEmpty()
                 ? LiveReadings.supported : AppSettings.getSupportedPids(this);
-        body("Pick what to show on the dashboard. You can change this any time with Edit Dashboard."
+        body("Pick what to show on the dashboard. You can change this any time with Edit readings."
                 + (supported.isEmpty() ? " The truck hasn't been checked yet, so none can be confirmed." : ""));
         for (PidCatalog.Pid pid : PidCatalog.all()) {
             String note = "";

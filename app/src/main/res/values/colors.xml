@@ -10,4 +10,17 @@
     <color name="textDisabled">#BDBDBD</color>
     <color name="green_start">#00C853</color>
     <color name="gray_disabled">#BDBDBD</color>
+    <!-- Dashboard -->
+    <color name="rail_bg">#0D1015</color>
+    <color name="dash_surface">#12161C</color>
+    <color name="dash_card">#1A1F27</color>
+    <color name="dash_track">#252C37</color>
+    <color name="dash_band">#1D4F3A</color>
+    <color name="dash_text">#EEF2F7</color>
+    <color name="dash_muted">#8B9BAB</color>
+    <color name="dash_ok">#3DD68C</color>
+    <color name="dash_warn">#F0A93B</color>
+    <color name="dash_crit">#F26B5B</color>
+    <color name="dash_accent">#3FC1C9</color>
+    <color name="dash_on_accent">#04161A</color>
 </resources>

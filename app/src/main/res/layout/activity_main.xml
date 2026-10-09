@@ -2,142 +2,300 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="horizontal">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="4dp">
+        android:layout_width="68dp"
+        android:layout_height="match_parent"
+        android:background="@color/rail_bg"
+        android:orientation="vertical"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
 
-        <Button
+        <TextView
             android:id="@+id/buttonTabDashboard"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minWidth="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textAllCaps="false"
-            android:textSize="11sp"
-            android:text="Dashboard" />
+            android:background="@drawable/bg_rail_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_dashboard"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="Dashboard"
+            android:textColor="@color/rail_item"
+            android:textSize="10sp" />
 
-        <Button
+        <TextView
             android:id="@+id/buttonTabDiagnostics"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="2dp"
-            android:minWidth="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textAllCaps="false"
-            android:textSize="11sp"
-            android:text="Diagnostics" />
+            android:background="@drawable/bg_rail_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_checks"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="Checks"
+            android:textColor="@color/rail_item"
+            android:textSize="10sp" />
 
-        <Button
+        <TextView
             android:id="@+id/buttonTabService"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="2dp"
-            android:minWidth="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textAllCaps="false"
-            android:textSize="11sp"
-            android:text="History" />
+            android:background="@drawable/bg_rail_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_history"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="History"
+            android:textColor="@color/rail_item"
+            android:textSize="10sp" />
 
-        <Button
+        <TextView
             android:id="@+id/buttonTabDeals"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="2dp"
-            android:minWidth="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textAllCaps="false"
-            android:textSize="11sp"
-            android:text="Deals" />
+            android:background="@drawable/bg_rail_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_deals"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="Deals"
+            android:textColor="@color/rail_item"
+            android:textSize="10sp" />
 
-        <Button
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <TextView
             android:id="@+id/buttonTabAccount"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="2dp"
-            android:minWidth="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textAllCaps="false"
-            android:textSize="11sp"
-            android:text="Account" />
+            android:background="@drawable/bg_rail_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:drawableTop="@drawable/ic_nav_account"
+            android:drawableTint="@color/rail_item"
+            android:drawablePadding="4dp"
+            android:gravity="center"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="Account"
+            android:textColor="@color/rail_item"
+            android:textSize="10sp" />
     </LinearLayout>
 
     <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
         android:layout_weight="1">
 
         <!-- ================= DASHBOARD TAB ================= -->
         <ScrollView
             android:id="@+id/scrollDashboard"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="match_parent"
+            android:background="@color/dash_surface"
+            android:fillViewport="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="12dp">
+
+                <!-- Status strip -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Dashboard"
+                            android:textColor="@color/dash_text"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/textLiveStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Tracking is off"
+                            android:textColor="@color/dash_text"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:id="@+id/textAdapterStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="No OBD adapter paired yet"
+                            android:textColor="@color/dash_muted"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/textHealth"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:paddingStart="10dp"
+                        android:paddingTop="4dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="4dp"
+                        android:text="Idle"
+                        android:textColor="@color/dash_muted"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/buttonToggleTracking"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_go"
+                        android:minWidth="0dp"
+                        android:minHeight="40dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="Start Tracking"
+                        android:textAllCaps="false"
+                        android:textColor="@color/dash_on_accent"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="#102A43">
+                    android:layout_marginTop="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                    <TextView
-                        android:id="@+id/textLiveStatus"
-                        android:layout_width="match_parent"
+                    <Button
+                        android:id="@+id/buttonTileSize"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:textColor="#F0F4F8"
-                        android:text="Tracking is off" />
+                        android:minWidth="0dp"
+                        android:text="Size: M"
+                        android:textAllCaps="false"
+                        android:textColor="@color/dash_accent"
+                        android:textSize="13sp" />
 
-                    <TextView
-                        android:id="@+id/textAdapterStatus"
-                        android:layout_width="match_parent"
+                    <Button
+                        android:id="@+id/buttonEditDashboard"
+                        style="@style/Widget.AppCompat.Button.Borderless"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textSize="13sp"
-                        android:textColor="#9FB3C8"
-                        android:text="No OBD adapter paired yet" />
+                        android:minWidth="0dp"
+                        android:text="Edit readings"
+                        android:textAllCaps="false"
+                        android:textColor="@color/dash_accent"
+                        android:textSize="13sp" />
                 </LinearLayout>
+
+                <GridLayout
+                    android:id="@+id/gridHero"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:columnCount="2" />
 
                 <GridLayout
                     android:id="@+id/gridTiles"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:columnCount="3" />
+
+                <GridLayout
+                    android:id="@+id/gridPlain"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:columnCount="2" />
 
-                <Button
-                    android:id="@+id/buttonEditDashboard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Choose Readings (PIDs)" />
-
-                <Button
-                    android:id="@+id/buttonToggleTracking"
+                <!-- Service strip: taps through to History -->
+                <LinearLayout
+                    android:id="@+id/cardService"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Start Tracking" />
+                    android:background="@drawable/bg_card"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="OIL LIFE"
+                            android:textColor="@color/dash_muted"
+                            android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/textDashOilPct"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="--"
+                            android:textColor="@color/dash_text"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <ProgressBar
+                        android:id="@+id/progressOil"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="8dp"
+                        android:layout_marginTop="8dp"
+                        android:max="100"
+                        android:progressBackgroundTint="@color/dash_track"
+                        android:progressTint="@color/dash_accent" />
+
+                    <TextView
+                        android:id="@+id/textDashNextService"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text=""
+                        android:textColor="@color/dash_muted"
+                        android:textSize="13sp" />
+                </LinearLayout>
             </LinearLayout>
         </ScrollView>
 

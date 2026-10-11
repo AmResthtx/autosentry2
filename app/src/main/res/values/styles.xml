@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark slate screens with a light gray toolbar. -->
+    <style name="Theme.AutoSentry" parent="Theme.AppCompat">
+        <item name="colorPrimary">@color/fs_toolbar</item>
+        <item name="colorPrimaryDark">@color/fs_rail</item>
+        <item name="colorAccent">@color/fs_val_blue</item>
+        <item name="colorButtonNormal">@color/fs_divider</item>
+        <item name="actionBarStyle">@style/AutoSentry.ActionBar</item>
+        <item name="actionBarTheme">@style/ThemeOverlay.AppCompat.Light</item>
+        <item name="android:windowBackground">@color/fs_bg</item>
+        <item name="android:textColorPrimary">@color/fs_text</item>
+        <item name="android:textColorSecondary">@color/fs_muted</item>
+        <item name="android:statusBarColor">@color/fs_rail</item>
+        <item name="android:navigationBarColor">@color/fs_rail</item>
+    </style>
+
+    <style name="AutoSentry.ActionBar" parent="Widget.AppCompat.ActionBar.Solid">
+        <item name="background">@color/fs_toolbar</item>
+    </style>
+</resources>

@@ -27,6 +27,10 @@ public final class PidCatalog {
     /** Seconds since the trip started (engine on), shown as h:mm:ss. */
     public static final int COMPUTED_TRIP_TIME = 0x1004;
 
+    /** Ford enhanced (Mode 22) readings on the 7.3L's J1850 PWM bus; not standard Mode 01 ids. */
+    public static final int FORD_ICP = 0x2000;
+    public static final int FORD_IPR = 0x2001;
+
     private static final String DURATION_FORMAT = "duration";
 
     public interface Decoder {
@@ -41,6 +45,9 @@ public final class PidCatalog {
         public final String format;
         public final boolean computed;
         private final Decoder decoder;
+        /** Dial scale for readings with no tolerance band; NaN when the reading has no sensible range. */
+        public double displayMin = Double.NaN;
+        public double displayMax = Double.NaN;
 
         Pid(int id, String name, String unit, int byteCount, String format, boolean computed, Decoder decoder) {
             this.id = id;
@@ -67,6 +74,17 @@ public final class PidCatalog {
             return String.format(java.util.Locale.US, format, value);
         }
 
+        /** Gives a reading with no tolerance band a dial scale. */
+        Pid range(double min, double max) {
+            displayMin = min;
+            displayMax = max;
+            return this;
+        }
+
+        public boolean isEnhanced() {
+            return id == FORD_ICP || id == FORD_IPR;
+        }
+
         public String label() {
             return unit.isEmpty() ? name : name + " (" + unit + ")";
         }
@@ -82,8 +100,17 @@ public final class PidCatalog {
         return b[0] * 256.0 + b[1];
     }
 
-    private static void std(int id, String name, String unit, int bytes, String fmt, Decoder d) {
-        ALL.put(id, new Pid(id, name, unit, bytes, fmt, false, d));
+    private static Pid std(int id, String name, String unit, int bytes, String fmt, Decoder d) {
+        Pid pid = new Pid(id, name, unit, bytes, fmt, false, d);
+        ALL.put(id, pid);
+        return pid;
+    }
+
+    /** Ford enhanced reading: not a Mode 01 id, read by the tracking service over Mode 22. */
+    private static Pid enhanced(int id, String name, String unit, String fmt) {
+        Pid pid = new Pid(id, name, unit, 0, fmt, false, null);
+        ALL.put(id, pid);
+        return pid;
     }
 
     private static void computed(int id, String name, String unit, String fmt) {
@@ -108,6 +135,29 @@ public final class PidCatalog {
         std(0x46, "Ambient Air Temp", "°F", 1, "%.0f", b -> cToF(b[0] - 40));
         std(0x42, "Battery / Module Voltage", "V", 2, "%.1f", b -> word(b) / 1000.0);
         std(0x1F, "Engine Run Time", "min", 2, "%.0f", b -> word(b) / 60.0);
+
+        // More standard Mode 01 readings. The connect-time scan decides which of these the truck answers.
+        std(0x05, "Coolant Temp", "°F", 1, "%.0f", b -> cToF(b[0] - 40));
+        std(0x43, "Absolute Load", "%", 2, "%.0f", b -> word(b) * 100.0 / 255.0).range(0, 100);
+        std(0x45, "Relative Throttle", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100);
+        std(0x4A, "Accelerator Pedal E", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100);
+        std(0x5A, "Relative Accel Pedal", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100);
+        std(0x4C, "Commanded Throttle", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100);
+        std(0x2C, "Commanded EGR", "%", 1, "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100);
+        std(0x2D, "EGR Error", "%", 1, "%.0f", b -> b[0] * 100.0 / 128.0 - 100.0).range(-100, 100);
+        std(0x5D, "Injection Timing", "°", 2, "%.1f", b -> word(b) / 128.0 - 210.0).range(-20, 40);
+        std(0x61, "Driver Demand Torque", "%", 1, "%.0f", b -> b[0] - 125.0).range(0, 100);
+        std(0x62, "Actual Torque", "%", 1, "%.0f", b -> b[0] - 125.0).range(0, 100);
+        std(0x63, "Reference Torque", "Nm", 2, "%.0f", b -> word(b));
+        std(0x01, "Trouble Code Count", "", 4, "%.0f", b -> b[0] & 0x7F);
+        std(0x21, "Distance With Check Engine On", "mi", 2, "%.0f", b -> word(b) * 0.621371);
+        std(0x30, "Warm-ups Since Codes Cleared", "", 1, "%.0f", b -> b[0]);
+        std(0x31, "Distance Since Codes Cleared", "mi", 2, "%.0f", b -> word(b) * 0.621371);
+        std(0x4E, "Time Since Codes Cleared", "min", 2, "%.0f", b -> word(b));
+
+        // Ford 7.3L enhanced readings (J1850 PWM only); the decoders live in ELM327Adapter.
+        enhanced(FORD_ICP, "Injection Control Pressure", "psi", "%.0f").range(0, 4000);
+        enhanced(FORD_IPR, "IPR Duty Cycle", "%", "%.0f").range(0, 100);
 
         computed(COMPUTED_INSTANT_MPG, "Instant MPG", "mpg", "%.1f");
         computed(COMPUTED_TRIP_MPG, "Trip Average MPG", "mpg", "%.1f");

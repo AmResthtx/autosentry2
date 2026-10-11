@@ -2,6 +2,8 @@
 
 AutoSentry turns a phone or tablet and a Bluetooth OBD-II adapter into a vehicle-aware diagnostic monitor, a mileage-and-hours-based maintenance tracker, and a real-time trip computer — built first for a 2000 Ford F-250 7.3L Power Stroke, but designed to support other vehicles through configurable PID profiles.
 
+Landing page: https://amresthtx.github.io/autosentry2/ (source in `site/`, published by `.github/workflows/pages.yml`).
+
 The whole point is zero change to the driver's habits. Pair the OBD adapter once. The adapter remains asleep while the truck is off, wakes when the key is turned to the **ON** position, and drops its connection when the truck shuts off. An adapter never opens the Bluetooth link itself, so AutoSentry keeps a background monitor running that retries the adapter every few seconds; the trip is picked up within seconds of key-on whether or not anyone opens the app or touches the tablet.
 
 ## What it does today

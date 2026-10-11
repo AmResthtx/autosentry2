@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoSentry: truck gauges, trip log and service tracker for Android</title>
+<meta name="description" content="AutoSentry turns an Android phone or tablet and a Bluetooth OBD-II adapter into live gauges, an automatic trip computer and a maintenance log. Built first for the 2000 F-250 7.3L Power Stroke.">
+<meta name="theme-color" content="#1B1C23">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AutoSentry: turn the key, it's already watching">
+<meta property="og:description" content="Live gauges, automatic trip logging and service reminders from a Bluetooth OBD-II adapter. Free and open source for Android.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%235B6B7C'/%3E%3Cpath d='M10 33A14 14 0 1 1 38 33M24 30l8-10' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1B1C23;
+    --surface: #23242D;
+    --surface-2: #2A2B35;
+    --line: #33343F;
+    --text: #E6E6E8;
+    --muted: #9A9AA3;
+    --ok: #7ADC69;
+    --warn: #FFB020;
+    --teal: #4DD9C8;
+    --blue: #29A6E8;
+    --display: "Bahnschrift", "DIN Alternate", "DIN Condensed", system-ui, sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--teal); }
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; line-height: 1.15; margin: 0; }
+  p { margin: 0; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+  /* Header */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(27, 28, 35, 0.88);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 24px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font: 600 19px var(--display); letter-spacing: 0.02em; }
+  .brand svg { width: 28px; height: 28px; }
+  .nav-links { display: flex; gap: 22px; margin-left: auto; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 15px; }
+  .nav-links a:hover { color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 0 20px; border-radius: 10px;
+    font: 600 16px var(--body); text-decoration: none; white-space: nowrap;
+  }
+  .btn svg { width: 18px; height: 18px; }
+  .btn-primary { background: var(--ok); color: #10200D; }
+  .btn-primary:hover { background: #8FE680; }
+  .btn-ghost { color: var(--text); border: 1px solid var(--line); background: var(--surface); }
+  .btn-ghost:hover { border-color: #4A4B57; }
+  .nav .btn { min-height: 38px; padding: 0 14px; font-size: 15px; }
+  @media (max-width: 760px) { .nav-links { display: none; } .nav .btn { margin-left: auto; } }
+
+  /* Hero */
+  .hero { padding: 72px 0 56px; text-align: center; }
+  .eyebrow { color: var(--muted); font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .hero h1 { font-size: clamp(38px, 7vw, 68px); margin: 14px auto 18px; max-width: 14ch; letter-spacing: -0.01em; }
+  .hero h1 span { color: var(--ok); }
+  .lede { color: #C9C9CF; font-size: clamp(17px, 2.2vw, 20px); max-width: 640px; margin: 0 auto; }
+  .ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+  .fine { color: var(--muted); font-size: 14px; margin-top: 16px; }
+
+  /* Device mock of the dashboard */
+  .device {
+    max-width: 980px; margin: 52px auto 0; padding: 12px;
+    background: #0E0F13; border: 1px solid #30313B; border-radius: 26px;
+    box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  }
+  .screen { display: flex; border-radius: 14px; overflow: hidden; background: #23242D; text-align: left; }
+  .rail { flex: none; width: 76px; background: #25262F; }
+  .rail div { padding: 10px 4px 8px; text-align: center; border-bottom: 1px solid #2D2E38; font-size: 10.5px; color: #E6E6E8; }
+  .rail div.on { background: #2F3140; }
+  .rail svg { display: block; width: 32px; height: 32px; margin: 0 auto 4px; }
+  .screen-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .toolbar { display: flex; align-items: center; height: 40px; padding: 0 8px 0 14px; background: #CFCFCF; color: #1E1E22; font-size: 16px; }
+  .toolbar span { flex: 1; }
+  .toolbar svg { width: 20px; height: 20px; margin-left: 14px; fill: none; stroke: #1E1E22; stroke-width: 2; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; }
+  .tiles svg { display: block; width: 100%; height: auto; aspect-ratio: 1; }
+  .needle { transform-box: view-box; transform-origin: 50px 50px; transition: transform 0.25s linear; }
+  @media (prefers-reduced-motion: reduce) { .needle { transition: none; } }
+  .caption { color: var(--muted); font-size: 13px; margin-top: 14px; }
+  @media (max-width: 700px) {
+    .device { padding: 8px; border-radius: 18px; margin-top: 40px; }
+    .rail { width: 40px; }
+    .rail div { padding: 8px 2px; font-size: 0; }
+    .rail svg { width: 26px; height: 26px; margin: 0 auto; }
+    .toolbar { height: 34px; font-size: 14px; padding-left: 10px; }
+    .toolbar svg { width: 16px; height: 16px; margin-left: 8px; }
+    .tiles { grid-template-columns: repeat(3, 1fr); }
+    .tiles > :nth-child(n+7) { display: none; }
+  }
+
+  /* Sections */
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  .kicker { color: var(--ok); font: 600 14px var(--display); letter-spacing: 0.1em; text-transform: uppercase; }
+  section h2 { font-size: clamp(30px, 4.4vw, 42px); margin: 10px 0 14px; max-width: 20ch; }
+  .intro { color: #C9C9CF; max-width: 640px; font-size: 18px; }
+
+  /* Timeline */
+  .timeline { list-style: none; padding: 0; margin: 44px 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .timeline li { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 18px 22px; }
+  .power { display: flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  .power i { display: block; width: 10px; height: 10px; border-radius: 50%; background: #4A4B57; }
+  .power.full i { background: var(--ok); box-shadow: 0 0 10px rgba(122, 220, 105, 0.6); }
+  .timeline h3 { font-size: 21px; margin-bottom: 8px; }
+  .timeline p { color: #BDBDC4; font-size: 15px; }
+  @media (max-width: 900px) { .timeline { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .timeline { grid-template-columns: 1fr; } }
+
+  /* Features */
+  .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 44px; }
+  .feature { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px 20px; }
+  .feature svg { width: 26px; height: 26px; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 14px; }
+  .feature h3 { font-size: 20px; margin-bottom: 8px; }
+  .feature p { color: #BDBDC4; font-size: 15px; }
+
+  /* Honest data + privacy */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; gap: 40px; } }
+  .labels { list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .labels li { display: grid; grid-template-columns: 132px 1fr; gap: 12px; padding: 16px 18px; background: var(--surface); border-top: 1px solid var(--line); font-size: 15px; color: #BDBDC4; }
+  .labels li:first-child { border-top: 0; }
+  .labels b { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+  .labels b::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+  @media (max-width: 480px) { .labels li { grid-template-columns: 1fr; gap: 4px; } }
+  .checks { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
+  .checks li { display: grid; grid-template-columns: 24px 1fr; gap: 12px; color: #C9C9CF; }
+  .checks svg { width: 22px; height: 22px; margin-top: 2px; fill: none; stroke: var(--ok); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Install */
+  .install { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 44px; }
+  @media (max-width: 860px) { .install { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 26px 24px; }
+  .panel h3 { font-size: 22px; margin-bottom: 16px; }
+  .panel ul, .panel ol { margin: 0; padding-left: 20px; display: grid; gap: 12px; color: #C9C9CF; }
+  .panel li::marker { color: var(--muted); }
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--warn); background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: 14px; color: #C9C9CF; }
+  .cta-band { margin-top: 44px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; padding: 28px; background: linear-gradient(135deg, #263127, #23242D 60%); border: 1px solid var(--line); border-radius: 16px; }
+  .cta-band h3 { font-size: 26px; }
+  .cta-band p { color: var(--muted); margin-top: 4px; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: grid; gap: 10px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="wrap nav" aria-label="Main">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#5B6B7C"/><path d="M10 33A14 14 0 1 1 38 33M24 30l8-10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      AutoSentry
+    </a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/AmResthtx/autosentry2">GitHub</a>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/AmResthtx/autosentry2/releases/latest">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <p class="eyebrow">For Android &middot; Built on a 2000 F-250 7.3L Power Stroke</p>
+    <h1>Turn the key. <span>It&rsquo;s already watching.</span></h1>
+    <p class="lede">AutoSentry turns an Android phone or tablet and a Bluetooth OBD-II adapter into live gauges, a trip computer and a maintenance log that keeps itself. Pair the adapter once; every trip after that starts on its own.</p>
+    <div class="ctas">
+      <a class="btn btn-primary" href="https://github.com/AmResthtx/autosentry2/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        Download for Android
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/AmResthtx/autosentry2">View the source</a>
+    </div>
+    <p class="fine">Free and open source &middot; Android 7.0 or newer &middot; No account, no cloud</p>
+
+    <div class="device" role="img" aria-label="AutoSentry dashboard showing gauges for engine RPM, engine oil temperature, injection control pressure, vehicle speed, battery voltage, instant MPG, engine load and intake manifold pressure">
+      <div class="screen" aria-hidden="true">
+        <div class="rail">
+          <div class="on"><svg viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#5B6B7C"/><path d="M10 33A14 14 0 1 1 38 33M24 30l8-10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Dashboard</div>
+          <div><svg viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#E0A81C"/><path d="M24 10L40 36H8z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M24 19v9M24 32v1" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>Checks</div>
+          <div><svg viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#D9782D"/><path d="M13 10h22v28H13z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M18 18h12M18 24h12M18 30h8" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>History</div>
+          <div><svg viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#3F7BD0"/><path d="M10 16L24 9l14 7v16l-14 7-14-7zM10 16l14 7 14-7M24 23v16" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>Deals</div>
+          <div><svg viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#7B7F8C"/><circle cx="24" cy="17" r="7" fill="none" stroke="#fff" stroke-width="3"/><path d="M9 40c2-8 8-11 15-11s13 3 15 11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>Account</div>
+        </div>
+        <div class="screen-main">
+          <div class="toolbar">
+            <span>Dashboard</span>
+            <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z" fill="#1E1E22" stroke="none"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M4 10a6 6 0 1 0 12 0a6 6 0 1 0-12 0M14.5 14.5L20 20M7 10h6"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M4 10a6 6 0 1 0 12 0a6 6 0 1 0-12 0M14.5 14.5L20 20M7 10h6M10 7v6"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M4 7h2M9 7h11M4 12h2M9 12h11M4 17h2M9 17h7"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 11v6M12 7.5v.5"/></svg>
+          </div>
+          <div class="tiles" id="tiles"></div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Sample readings, drawn with the same dial math the app uses.</p>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2>Zero change to how you drive.</h2>
+      <p class="intro">An adapter never opens the Bluetooth link on its own, so AutoSentry keeps a quiet background monitor that does it for you. Nobody has to open the app or touch the tablet.</p>
+      <ol class="timeline">
+        <li>
+          <p class="power"><i></i>Low power</p>
+          <h3>Truck off</h3>
+          <p>The adapter sleeps. The tablet wakes every 15 seconds for one quick key-on check: no GPS, no wake lock.</p>
+        </li>
+        <li>
+          <p class="power full"><i></i>Full power</p>
+          <h3>Key on</h3>
+          <p>Before you crank, a key-on check snapshots battery voltage, readings and trouble codes. Then it times the crank.</p>
+        </li>
+        <li>
+          <p class="power full"><i></i>Full power</p>
+          <h3>Driving</h3>
+          <p>Four readings a second plus GPS. A dropped link is retried at once and the gap is filled from GPS.</p>
+        </li>
+        <li>
+          <p class="power"><i></i>Low power</p>
+          <h3>Shut off</h3>
+          <p>Two minutes after the engine stops, the trip closes and is logged with distance, fuel used and average MPG.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <p class="kicker">Features</p>
+      <h2>Everything the truck will tell you, on one screen.</h2>
+      <div class="features">
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#29A6E8" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0M12 17l4-5"/></svg>
+          <h3>Pick your gauges</h3>
+          <p>About 35 readings, including load, EGR, torque, injection timing and the 7.3L&rsquo;s Ford ICP and IPR. Out-of-range gauges get an amber or red border.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#FFC93C" aria-hidden="true"><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0zM12 9v6"/></svg>
+          <h3>Oil temp, not a guess</h3>
+          <p>On the 7.3L the temperature that matters is engine oil, read from Ford&rsquo;s enhanced PID instead of assuming coolant.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#7ADC69" aria-hidden="true"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/></svg>
+          <h3>Key-on check</h3>
+          <p>Every key cycle: battery voltage, readings and stored and pending codes before cranking, then crank time, tries and lowest cranking voltage.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#FFA526" aria-hidden="true"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>
+          <h3>Oil life that moves</h3>
+          <p>Counts down from real miles on the 3,000 mi severe / 5,000 mi normal schedule. Idling, engine hours and oil temp flag severe duty.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#4DD9C8" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M9 15l2 2 4-4"/></svg>
+          <h3>Service reminders</h3>
+          <p>Fuel and air filters, transmission, transfer case, diffs, coolant, grease points and age-based wear items, flagged approaching, due or overdue.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#F25DA6" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/></svg>
+          <h3>Trip computer</h3>
+          <p>Speed, distance and real-time MPG from MAF airflow and GPS speed, with every trip logged automatically.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#F0463C" aria-hidden="true"><path d="M12 4l9 16H3zM12 10v4M12 17v.5"/></svg>
+          <h3>Trouble codes</h3>
+          <p>Stored, pending and permanent codes, read and decoded. A connection test names the exact step that fails when something won&rsquo;t talk.</p>
+        </article>
+        <article class="feature">
+          <svg viewBox="0 0 24 24" stroke="#9A9AA3" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/></svg>
+          <h3>Service log with proof</h3>
+          <p>Log the work and attach receipts and part photos. Each record is labeled by the evidence behind it.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="wrap split">
+      <div>
+        <p class="kicker">Honest data</p>
+        <h2>It tells you what it knows, and what it doesn&rsquo;t.</h2>
+        <p class="intro">Dropped connections, missing readings and stale values are shown as they are, never filled in with simulated data. Every number says where it came from.</p>
+      </div>
+      <ul class="labels">
+        <li><b style="--c:#7ADC69">Measured</b>Returned by the truck, with a timestamp and trip.</li>
+        <li><b style="--c:#29A6E8">Recorded</b>Service you entered, with an optional receipt or photo.</li>
+        <li><b style="--c:#4DD9C8">Calculated</b>Mileage, engine hours and oil life worked out from stored data.</li>
+        <li><b style="--c:#FFB020">Recommended</b>Raised only when a documented threshold is near.</li>
+        <li><b style="--c:#6B6C76">Unavailable</b>The truck didn&rsquo;t answer, and the app says so.</li>
+      </ul>
+    </div>
+    <div class="wrap" style="margin-top:64px">
+      <p class="kicker">Privacy</p>
+      <h2>Your truck&rsquo;s data stays on your device.</h2>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>No account and no cloud. The app doesn&rsquo;t even ask for internet access.</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>Trips, readings and service records are stored on the device, and Android backup is turned off so they aren&rsquo;t copied anywhere else.</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>Reports and the debug log leave the device only when you tap share.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <p class="kicker">Install</p>
+      <h2>Three steps to your dash.</h2>
+      <div class="install">
+        <div class="panel">
+          <h3>What you need</h3>
+          <ul>
+            <li>An Android 7.0 or newer phone or tablet.</li>
+            <li>An ELM327-compatible OBD-II adapter that uses classic Bluetooth. Bluetooth LE-only adapters won&rsquo;t connect.</li>
+            <li>An OBD-II vehicle. Readings and the service schedule are tuned for the 2000 F-250 7.3L Power Stroke; other vehicles get the standard readings they answer.</li>
+          </ul>
+          <p class="note">For the 7.3L&rsquo;s Ford readings (oil temp, ICP, IPR), the adapter must support the truck&rsquo;s J1850 PWM protocol.</p>
+        </div>
+        <div class="panel">
+          <h3>Install it</h3>
+          <ol>
+            <li>On the phone or tablet, open the <a href="https://github.com/AmResthtx/autosentry2/releases/latest">latest release</a> and tap the <code>AutoSentry-&hellip;.apk</code> file.</li>
+            <li>When Android asks, allow your browser to install apps.</li>
+            <li>Open AutoSentry. The setup wizard covers permissions, picking the paired adapter, a truck connection test, your odometer and your gauges.</li>
+          </ol>
+          <p class="note">Updates install over the top and keep your trips and service history. Don&rsquo;t uninstall first.</p>
+        </div>
+      </div>
+      <div class="cta-band">
+        <div>
+          <h3>Put a sentry on your dash.</h3>
+          <p>Free and open source under the Apache 2.0 license.</p>
+        </div>
+        <a class="btn btn-primary" href="https://github.com/AmResthtx/autosentry2/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          Download for Android
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>AutoSentry is open source under the <a href="https://github.com/AmResthtx/autosentry2/blob/master/LICENSE">Apache 2.0 license</a>. <a href="https://github.com/AmResthtx/autosentry2">Source on GitHub</a>.</p>
+    <p>The maintenance schedule is a starting point, not a substitute for the owner&rsquo;s manual, the service manual or a qualified inspection. AutoSentry is not affiliated with Ford Motor Company; Ford and Power Stroke are trademarks of their owners.</p>
+  </div>
+</footer>
+
+<script>
+// Dashboard preview. Ports GaugeTileView and GaugeScale from the app so the tiles look like
+// the real thing; the viewBox is the tile size (s = 100).
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  var PALETTE = ['#F0463C', '#7ADC69', '#FFA526', '#4DD9C8', '#FFC93C', '#F25DA6', '#29A6E8'];
+  var START = 150, SWEEP = 240;
+
+  // Scale ends are each reading's critical limits (PidToleranceEngine) or catalog range;
+  // null draws a flat tile. Values are sample cruising readings.
+  var GAUGES = [
+    {id: 0x0C, name: 'Engine RPM', unit: 'rpm', min: 100, max: 4500, dp: 0, v: 1850, amp: 60},
+    {id: 0x5C, name: 'Engine Oil Temp', unit: '°F', min: 80, max: 260, dp: 0, v: 196, amp: 1},
+    {id: 0x2000, name: 'Injection Control Pressure', unit: 'psi', min: 0, max: 4000, dp: 0, v: 1150, amp: 60},
+    {id: 0x0D, name: 'Vehicle Speed', unit: 'mph', min: 0, max: 130, dp: 0, v: 62, amp: 1.5},
+    {id: 0x42, name: 'Battery / Module Voltage', unit: 'V', min: 9.5, max: 16, dp: 1, v: 14.1, amp: 0.05},
+    {id: 0x1000, name: 'Instant MPG', unit: 'mpg', min: null, max: null, dp: 1, v: 17.4, amp: 1.2},
+    {id: 0x04, name: 'Engine Load', unit: '%', min: 0, max: 120, dp: 0, v: 42, amp: 6},
+    {id: 0x0B, name: 'Intake Manifold Pressure', unit: 'psi', min: 2, max: 30, dp: 1, v: 19.6, amp: 0.8}
+  ];
+
+  function paletteIndex(id) { return Math.abs((id ^ (id >> 3)) * 7 + (id >> 1)) % 7; }
+
+  function niceStep(span, target) {
+    var raw = span / target;
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var f = raw / mag;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+  }
+
+  function scaleFor(min, max) {
+    var step = niceStep(max - min, 6);
+    var lo = Math.floor(min / step + 1e-9) * step, hi = Math.ceil(max / step - 1e-9) * step;
+    var labelStep = niceStep(hi - lo, 6), labels = [];
+    for (var v = Math.ceil(lo / labelStep) * labelStep; v <= hi + labelStep * 1e-9; v += labelStep) labels.push(v);
+    var eps = (hi - lo) * 1e-6, stops = [lo];
+    labels.forEach(function (x) { if (x > stops[stops.length - 1] + eps && x < hi - eps) stops.push(x); });
+    stops.push(hi);
+    return {labels: labels, stops: stops, frac: function (x) { return Math.max(0, Math.min(1, (x - lo) / (hi - lo))); }};
+  }
+
+  function point(frac, r) {
+    var a = (START + SWEEP * frac) * Math.PI / 180;
+    return [50 + r * Math.cos(a), 50 + r * Math.sin(a)];
+  }
+
+  function el(parent, tag, attrs, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    parent.appendChild(e);
+    return e;
+  }
+
+  function radial(svg, frac, from, to, color, width) {
+    var a = point(frac, from), b = point(frac, to);
+    el(svg, 'line', {x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: color, 'stroke-width': width});
+  }
+
+  function format(v) { return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1); }
+
+  // Shrinks text so it fits maxWidth, like GaugeTileView.fit.
+  function fit(text, size, maxWidth) {
+    text.setAttribute('font-size', size);
+    var w = text.getComputedTextLength();
+    if (w > maxWidth) text.setAttribute('font-size', size * maxWidth / w);
+  }
+
+  var grid = document.getElementById('tiles');
+  var tiles = GAUGES.map(function (g, i) {
+    var color = PALETTE[paletteIndex(g.id)];
+    var svg = el(grid, 'svg', {viewBox: '0 0 100 100', 'font-family': 'Roboto, system-ui, sans-serif', 'text-anchor': 'middle'});
+    var defs = el(svg, 'defs', {});
+    var bg = el(defs, 'linearGradient', {id: 'bg' + i, x1: 0, y1: 0, x2: 0, y2: 1});
+    el(bg, 'stop', {offset: 0, 'stop-color': '#333333'});
+    el(bg, 'stop', {offset: 0.55, 'stop-color': '#0C0C0C'});
+    el(bg, 'stop', {offset: 1, 'stop-color': '#030303'});
+    el(svg, 'rect', {x: 1.1, y: 1.1, width: 97.8, height: 97.8, rx: 9, fill: 'url(#bg' + i + ')', stroke: '#27262B', 'stroke-width': 2.2});
+
+    var t = {g: g, value: g.v, dial: g.min != null ? scaleFor(g.min, g.max) : null};
+    if (t.dial) {
+      var stops = t.dial.stops;
+      for (var s = 0; s + 1 < stops.length; s++) {
+        for (var k = 1; k <= 4; k++) {
+          radial(svg, t.dial.frac(stops[s] + (stops[s + 1] - stops[s]) * k / 5), 43.5, 47.5, '#B3B3B3', 0.9);
+        }
+      }
+      stops.forEach(function (v, j) {
+        var end = j === 0 || j === stops.length - 1;
+        radial(svg, t.dial.frac(v), end ? 37 : 39.5, 48, '#F2F2F2', end ? 2.2 : 1.6);
+      });
+      var numerals = t.dial.labels.map(function (v) {
+        var p = point(t.dial.frac(v), 31);
+        return el(svg, 'text', {x: p[0], y: p[1] + 3.5, 'font-size': 10.5, fill: '#D2D2D2'}, format(v));
+      });
+      // Four-digit numerals touch at full size; shrink them all to the widest one's fit.
+      var widest = Math.max.apply(null, numerals.map(function (n) { return n.getComputedTextLength(); }));
+      if (widest > 19) numerals.forEach(function (n) { n.setAttribute('font-size', 10.5 * 19 / widest); });
+      el(svg, 'text', {x: 50, y: 35.5, 'font-size': 9.5, fill: color}, g.unit);
+      // Drawn pointing right, then rotated onto the dial.
+      t.needle = el(svg, 'polygon', {points: '50,52.4 90,50.6 90,49.4 50,47.6', fill: '#FFFFFF', 'class': 'needle'});
+      var hub = el(defs, 'radialGradient', {id: 'hub' + i, cx: 0.35, cy: 0.35, r: 0.7});
+      el(hub, 'stop', {offset: 0, 'stop-color': '#3A3A3C'});
+      el(hub, 'stop', {offset: 1, 'stop-color': '#141416'});
+      el(svg, 'circle', {cx: 50, cy: 50, r: 5.5, fill: 'url(#hub' + i + ')'});
+      el(svg, 'circle', {cx: 50, cy: 50, r: 1.925, fill: '#141416'});
+      t.text = el(svg, 'text', {x: 50, y: 80, 'font-weight': 700, fill: color});
+      t.size = 15; t.maxWidth = 62;
+    } else {
+      el(svg, 'text', {x: 50, y: 22, 'font-size': 10.5, fill: color}, g.unit);
+      t.text = el(svg, 'text', {x: 50, y: 52, 'font-weight': 700, fill: color});
+      t.size = 19; t.maxWidth = 80;
+    }
+    fit(el(svg, 'text', {x: 50, y: 95.5, fill: '#E6E6E8'}, g.name), 10.5, 90);
+    return t;
+  });
+
+  function render(t) {
+    var g = t.g;
+    t.text.textContent = t.value.toFixed(g.dp);
+    fit(t.text, t.size, t.maxWidth);
+    if (t.needle) t.needle.style.transform = 'rotate(' + (START + SWEEP * t.dial.frac(t.value)) + 'deg)';
+  }
+  tiles.forEach(render);
+
+  // Drift the readings at the app's four polls a second while the preview is on screen.
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var visible = true;
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries) { visible = entries[0].isIntersecting; }).observe(grid);
+  }
+  setInterval(function () {
+    if (!visible || document.hidden) return;
+    tiles.forEach(function (t) {
+      var g = t.g;
+      t.value += (g.v - t.value) * 0.15 + (Math.random() - 0.5) * g.amp;
+      render(t);
+    });
+  }, 250);
+})();
+</script>
+</body>
+</html>

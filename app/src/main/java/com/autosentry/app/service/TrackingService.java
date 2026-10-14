@@ -48,6 +48,7 @@ import com.autosentry.app.util.TabletFiles;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
@@ -113,6 +114,7 @@ public class TrackingService extends Service {
     private static final long OIL_READ_INTERVAL_MS = 2_000L;
     // ICP/IPR (Ford Mode 22) are read only while one is on the dashboard, with the same header-switch cost.
     private static final long ICP_READ_INTERVAL_MS = 1_000L;
+    private static final long FORD_EXTRA_READ_INTERVAL_MS = 2_000L;
     // GPS below this is parked jitter, not driving.
     private static final double GPS_MOVING_MPH = 3.0;
     private static final double STARTED_RPM = EngineWatch.RUNNING_RPM;
@@ -143,6 +145,7 @@ public class TrackingService extends Service {
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
     private long lastIcpRead = 0;
+    private long lastFordExtraRead = 0;
     // Avoids re-notifying every tick once an item crosses 80%; cleared
     // when the item is serviced (odometerAtEvent moves the baseline back).
     private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
@@ -522,6 +525,9 @@ public class TrackingService extends Service {
         if (pwmBus) {
             offered.add(PidCatalog.FORD_ICP);
             offered.add(PidCatalog.FORD_IPR);
+            for (PidCatalog.Pid pid : PidCatalog.all()) {
+                if (pid.fordCode != null) offered.add(pid.id);
+            }
         }
         LiveReadings.supported = offered;
         AppSettings.setSupportedPids(this, offered);
@@ -805,6 +811,23 @@ public class TrackingService extends Service {
             double[] icpIpr = realAdapter.readFordIcpIpr();
             putOrRemove(PidCatalog.FORD_ICP, icpIpr[0]);
             putOrRemove(PidCatalog.FORD_IPR, icpIpr[1]);
+        }
+
+        if (pwmBus && now - lastFordExtraRead >= FORD_EXTRA_READ_INTERVAL_MS) {
+            List<PidCatalog.Pid> extras = new ArrayList<>();
+            for (int id : want) {
+                PidCatalog.Pid def = PidCatalog.get(id);
+                if (def != null && def.fordCode != null) extras.add(def);
+            }
+            if (!extras.isEmpty()) {
+                lastFordExtraRead = now;
+                String[] codes = new String[extras.size()];
+                for (int i = 0; i < codes.length; i++) codes[i] = extras.get(i).fordCode;
+                int[][] raw = realAdapter.readFordRaw(codes);
+                for (int i = 0; i < codes.length; i++) {
+                    putOrRemove(extras.get(i).id, extras.get(i).decode(raw[i]));
+                }
+            }
         }
 
         lastConnectedTimestamp = now;

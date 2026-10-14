@@ -51,4 +51,14 @@ public class PidCatalogTest {
         assertEquals(4000, icp.displayMax, 0);
         assertTrue(Double.isNaN(icp.decode(new int[]{1, 2})));
     }
+
+    @Test
+    public void experimentalFordReadingsDecodeTwoBytes() {
+        PidCatalog.Pid map = PidCatalog.get(PidCatalog.FORD_MAP);
+        assertTrue(map.isEnhanced());
+        assertEquals("1440", map.fordCode);
+        assertEquals(14.5, map.decode(new int[]{0x01, 0x90}), 0.01);
+        assertEquals(10.0, PidCatalog.get(PidCatalog.FORD_MFDES).decode(new int[]{0x00, 0xA0}), 1e-9);
+        assertTrue(Double.isNaN(map.decode(null)));
+    }
 }

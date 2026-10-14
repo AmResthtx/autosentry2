@@ -30,6 +30,15 @@ public final class PidCatalog {
     /** Ford enhanced (Mode 22) readings on the 7.3L's J1850 PWM bus; not standard Mode 01 ids. */
     public static final int FORD_ICP = 0x2000;
     public static final int FORD_IPR = 0x2001;
+    /**
+     * Experimental Ford readings (one published source each, see docs/FORD_73_PIDS_AND_KOEO.md);
+     * absolute pressures in psia, so boost is MAP - BARO. Check on the truck before trusting.
+     */
+    public static final int FORD_MAP = 0x2002;
+    public static final int FORD_BARO = 0x2003;
+    public static final int FORD_EBP = 0x2004;
+    public static final int FORD_FPW = 0x2005;
+    public static final int FORD_MFDES = 0x2006;
 
     private static final String DURATION_FORMAT = "duration";
 
@@ -48,6 +57,8 @@ public final class PidCatalog {
         /** Dial scale for readings with no tolerance band; NaN when the reading has no sensible range. */
         public double displayMin = Double.NaN;
         public double displayMax = Double.NaN;
+        /** Four-hex Mode 22 PID decoded generically from {@link #decode}; null for Mode 01 and the hand-decoded ICP/IPR. */
+        public String fordCode;
 
         Pid(int id, String name, String unit, int byteCount, String format, boolean computed, Decoder decoder) {
             this.id = id;
@@ -82,7 +93,7 @@ public final class PidCatalog {
         }
 
         public boolean isEnhanced() {
-            return id == FORD_ICP || id == FORD_IPR;
+            return id == FORD_ICP || id == FORD_IPR || fordCode != null;
         }
 
         public String label() {
@@ -109,6 +120,14 @@ public final class PidCatalog {
     /** Ford enhanced reading: not a Mode 01 id, read by the tracking service over Mode 22. */
     private static Pid enhanced(int id, String name, String unit, String fmt) {
         Pid pid = new Pid(id, name, unit, 0, fmt, false, null);
+        ALL.put(id, pid);
+        return pid;
+    }
+
+    /** Experimental Ford Mode 22 reading decoded from its two data bytes. */
+    private static Pid ford(int id, String code, String name, String unit, String fmt, Decoder d) {
+        Pid pid = new Pid(id, name, unit, 2, fmt, false, d);
+        pid.fordCode = code;
         ALL.put(id, pid);
         return pid;
     }
@@ -158,6 +177,12 @@ public final class PidCatalog {
         // Ford 7.3L enhanced readings (J1850 PWM only); the decoders live in ELM327Adapter.
         enhanced(FORD_ICP, "Injection Control Pressure", "psi", "%.0f").range(0, 4000);
         enhanced(FORD_IPR, "IPR Duty Cycle", "%", "%.0f").range(0, 100);
+
+        ford(FORD_MAP, "1440", "MAP (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50);
+        ford(FORD_BARO, "1442", "Barometric (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 20);
+        ford(FORD_EBP, "1445", "Exhaust Back Pressure (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50);
+        ford(FORD_FPW, "1410", "Fuel Pulse Width (unverified)", "ms", "%.2f", b -> word(b) * 0.008).range(0, 5);
+        ford(FORD_MFDES, "1412", "Fuel Desired (unverified)", "mg/stroke", "%.1f", b -> word(b) / 16.0).range(0, 100);
 
         computed(COMPUTED_INSTANT_MPG, "Instant MPG", "mpg", "%.1f");
         computed(COMPUTED_TRIP_MPG, "Trip Average MPG", "mpg", "%.1f");

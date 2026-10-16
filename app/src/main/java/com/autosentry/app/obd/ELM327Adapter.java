@@ -230,6 +230,11 @@ public class ELM327Adapter {
         return new double[]{decodeFordIcpPsi(data[0]), decodeFordIprPercent(data[1])};
     }
 
+    /** Raw data bytes for each Mode 22 code (four hex digits, e.g. "1440"); null where the PCM didn't answer. */
+    public synchronized int[][] readFordRaw(String... codes) throws IOException {
+        return readFord(codes);
+    }
+
     /** Asks the PCM directly for each Mode 22 PID under one header switch; null where it had no answer. */
     private int[][] readFord(String... pids) throws IOException {
         int[][] data = new int[pids.length][];

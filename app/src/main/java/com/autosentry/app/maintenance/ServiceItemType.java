@@ -1,17 +1,39 @@
 package com.autosentry.app.maintenance;
 
 /**
- * Serviceable items tracked against Ford's published 7.3L Power Stroke
- * F-250–F-550 maintenance intervals (Normal vs Special/Severe service).
- * String value doubles as the MaintenanceEvent.type stored in the DB.
+ * Every serviceable item AutoSentry tracks for the 7.3L Power Stroke Super
+ * Duty. Details (intervals, category, parts, related jobs) live in
+ * ServiceInterval. String value doubles as the MaintenanceEvent.type stored
+ * in the DB, so existing names must never be renamed.
  */
 public enum ServiceItemType {
+    // Engine
     OIL_FILTER,
+    COOLANT,
+    COOLANT_SCA,
+    SERPENTINE_BELT,
+    BATTERIES,
+    GLOW_PLUGS,
+    // Fuel & air
     FUEL_FILTER,
     AIR_FILTER,
+    // Drivetrain
     TRANSMISSION_FLUID,
     TRANSFER_CASE_FLUID,
     FRONT_DIFFERENTIAL,
     REAR_DIFFERENTIAL,
-    COOLANT
+    DRIVESHAFT_GREASE,
+    // Steering & suspension
+    STEERING_GREASE,
+    FRONT_END_INSPECTION,
+    SHOCKS,
+    // Brakes & tires
+    BRAKES,
+    BRAKE_FLUID,
+    TIRE_ROTATION,
+    TIRE_AGE,
+    // 7.3L age/wear items
+    CAC_BOOTS,
+    UVCH,
+    COOLANT_HOSES
 }

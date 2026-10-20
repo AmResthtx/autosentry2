@@ -1,113 +1,403 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/dashboard_bg"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="16dp">
 
-        <TextView
+        <!-- ============ Service info (hidden for Upgrade/Other) ============ -->
+        <LinearLayout
+            android:id="@+id/layoutServiceInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Type"
-            android:textStyle="bold" />
+            android:orientation="vertical"
+            android:background="@color/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="12dp"
+            android:visibility="gone">
 
-        <Spinner
-            android:id="@+id/spinnerType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" />
+            <TextView
+                android:id="@+id/textServiceTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="@color/textPrimary" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Title (e.g. &quot;Steel front bumper&quot;)"
-            android:textStyle="bold" />
+            <TextView
+                android:id="@+id/textServiceStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/amber_warning" />
 
-        <EditText
-            android:id="@+id/editTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:inputType="text" />
+            <TextView
+                android:id="@+id/textServiceLast"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textSize="13sp"
+                android:textColor="@color/textSecondary" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Notes"
-            android:textStyle="bold" />
+            <TextView
+                android:id="@+id/textServiceWhy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textSize="15sp"
+                android:textColor="@color/reading_text"
+                android:lineSpacingMultiplier="1.15" />
 
-        <EditText
-            android:id="@+id/editNotes"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:inputType="textMultiLine"
-            android:minLines="3" />
+            <TextView
+                android:id="@+id/textServiceSource"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="12sp"
+                android:textColor="@color/textDisabled" />
 
-        <TextView
-            android:id="@+id/textOdometer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Odometer: -- mi"
-            android:textColor="#757575" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="12dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Photos (receipts, parts, install shots)"
-            android:textStyle="bold" />
+            <TextView
+                android:id="@+id/labelParts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/what_you_need"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
 
-        <HorizontalScrollView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp">
+            <TextView
+                android:id="@+id/textParts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:lineSpacingMultiplier="1.2"
+                android:textColor="@color/reading_text" />
+
+            <TextView
+                android:id="@+id/labelAlwaysReplace"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/always_replace"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/textAlwaysReplace"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:lineSpacingMultiplier="1.2"
+                android:textColor="@color/reading_text" />
+
+            <TextView
+                android:id="@+id/labelWhileInThere"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/while_in_there"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/textWhileInThereHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textSize="13sp"
+                android:textColor="@color/textDisabled"
+                android:text="@string/while_in_there_hint" />
 
             <LinearLayout
-                android:id="@+id/layoutPhotoThumbnails"
-                android:layout_width="wrap_content"
+                android:id="@+id/layoutWhileInThere"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal" />
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
 
-        </HorizontalScrollView>
+            <TextView
+                android:id="@+id/textAddOns"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:lineSpacingMultiplier="1.2"
+                android:textColor="@color/reading_text" />
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/labelResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/result"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <RadioGroup
+                android:id="@+id/radioResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp">
+
+                <RadioButton
+                    android:id="@+id/radioResultOk"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="@string/result_ok"
+                    android:textColor="@color/reading_text" />
+
+                <RadioButton
+                    android:id="@+id/radioResultRepaired"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/result_repaired"
+                    android:textColor="@color/reading_text" />
+
+                <RadioButton
+                    android:id="@+id/radioResultReplaced"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/result_replaced"
+                    android:textColor="@color/reading_text" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/done_before_today"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+
+                <EditText
+                    android:id="@+id/editMilesAgo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="@string/miles_ago"
+                    android:inputType="number"
+                    android:textColor="@color/reading_text"
+                    android:textColorHint="@color/textDisabled"
+                    android:backgroundTint="@color/card_border" />
+
+                <EditText
+                    android:id="@+id/editMonthsAgo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:hint="@string/months_ago"
+                    android:inputType="number"
+                    android:textColor="@color/reading_text"
+                    android:textColorHint="@color/textDisabled"
+                    android:backgroundTint="@color/card_border" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ============ Upgrade / Other (hidden for scheduled services) ============ -->
+        <LinearLayout
+            android:id="@+id/layoutOtherWork"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/type"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <Spinner
+                android:id="@+id/spinnerType"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/title_hint"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <EditText
+                android:id="@+id/editTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:inputType="text"
+                android:textColor="@color/reading_text"
+                android:textColorHint="@color/textDisabled"
+                android:backgroundTint="@color/card_border" />
+        </LinearLayout>
+
+        <!-- Notes Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp">
+            android:orientation="vertical"
+            android:background="@color/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="12dp">
 
-            <Button
-                android:id="@+id/buttonTakePhoto"
-                android:layout_width="0dp"
+            <TextView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Camera" />
+                android:text="@string/notes_hint"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
 
-            <Button
-                android:id="@+id/buttonPickPhoto"
-                android:layout_width="0dp"
+            <EditText
+                android:id="@+id/editNotes"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:text="Gallery" />
+                android:layout_marginTop="4dp"
+                android:inputType="textMultiLine"
+                android:minLines="3"
+                android:textColor="@color/reading_text"
+                android:textColorHint="@color/textDisabled"
+                android:backgroundTint="@color/card_border" />
 
+            <TextView
+                android:id="@+id/textOdometer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Odometer: -- mi"
+                android:textColor="@color/textSecondary"
+                android:textSize="14sp"
+                android:fontFamily="monospace" />
+        </LinearLayout>
+
+        <!-- Photos Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/photos"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp">
+
+                <LinearLayout
+                    android:id="@+id/layoutPhotoThumbnails"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+
+            </HorizontalScrollView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <Button
+                    android:id="@+id/buttonTakePhoto"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/camera"
+                    android:textColor="@color/textPrimary"
+                    android:backgroundTint="@color/card_border"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/buttonPickPhoto"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/gallery"
+                    android:textColor="@color/textPrimary"
+                    android:backgroundTint="@color/card_border"
+                    android:textAllCaps="false" />
+
+            </LinearLayout>
         </LinearLayout>
 
         <Button
             android:id="@+id/buttonSaveEvent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Save" />
+            android:layout_marginTop="8dp"
+            android:text="@string/save_record"
+            android:textColor="@color/textPrimary"
+            android:backgroundTint="@color/green_ok"
+            android:textAllCaps="false"
+            android:textSize="16sp"
+            android:padding="16dp" />
 
     </LinearLayout>
-
 </ScrollView>

@@ -60,6 +60,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.SystemsScanActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.LogMaintenanceActivity"
             android:exported="false" />
 

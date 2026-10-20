@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AutoSentry</string>
     <string name="start_trip">Start Trip</string>
@@ -14,4 +15,70 @@
     <string name="bluetooth_permission">Bluetooth permission required for OBD adapter</string>
     <string name="notification_permission">Notifications required for RPM alerts</string>
     <string name="location_permission">Location permission required for Bluetooth scanning (Android 12+)</string>
+
+    <!-- Dashboard -->
+    <string name="tab_dashboard">Dashboard</string>
+    <string name="tab_service">Service</string>
+    <string name="adapter_status">Adapter Status</string>
+    <string name="live_readings">Live Readings</string>
+    <string name="tracking_off">Tracking Off</string>
+    <string name="tracking_on">Tracking Active</string>
+    <string name="edit_dashboard">Edit Dashboard</string>
+    <string name="start_tracking">Start Tracking</string>
+    <string name="stop_tracking">Stop Tracking</string>
+    <string name="pair_adapter">Pair OBD Adapter</string>
+    <string name="auto_tracking">Auto-Tracking</string>
+    <string name="background_access">Allow Background Start</string>
+    <string name="view_debug_log">View Debug Log</string>
+
+    <!-- Service -->
+    <string name="oil_life">Oil Life</string>
+    <string name="since_last_change">Since last oil change</string>
+    <string name="odometer">Odometer</string>
+    <string name="service_schedule">Service Schedule</string>
+    <string name="service_hint">Tap a service to record it. Long-press to hide one that doesn\'t apply to your truck.</string>
+    <string name="maintenance_history">Maintenance History</string>
+
+    <!-- Codes -->
+    <string name="tab_codes">Codes</string>
+    <string name="check_engine_light">Check Engine Light</string>
+    <string name="trouble_codes">Trouble Codes</string>
+    <string name="codes_hint">Tap a code for what it means and what to check.</string>
+    <string name="scan_codes">Scan for Codes</string>
+    <string name="clear_codes">Clear Codes</string>
+    <string name="truck_systems">Truck Systems</string>
+    <string name="scan_truck_systems">Scan Truck Systems</string>
+    <string name="systems_scan_hint">Finds everything this truck will talk about: the adapter, the bus, every module that answers, every standard reading, and the Ford PIDs the engine computer answers. Read-only. Takes a few minutes.</string>
+    <string name="run_systems_scan">Run Scan</string>
+    <string name="stop_scan">Stop</string>
+    <string name="codes_disclaimer">Severity is AutoSentry\'s guidance from the 7.3L code list, not a diagnosis. Injector driver module codes behind P1316 need a full self-test (FORScan or a Ford scan tool).</string>
+
+    <!-- Log Maintenance -->
+    <string name="service_info">Service Info</string>
+    <string name="what_you_need">What you\'ll need</string>
+    <string name="always_replace">Always replace (one-time use)</string>
+    <string name="while_in_there">While you\'re in there</string>
+    <string name="while_in_there_hint">Same teardown, so do them now and pay for the labor once. Tick anything you did too.</string>
+    <string name="result">Result</string>
+    <string name="result_ok">Checked — looks good</string>
+    <string name="result_repaired">Repaired / adjusted</string>
+    <string name="result_replaced">Replaced</string>
+    <string name="done_before_today">Done before today? (optional)</string>
+    <string name="miles_ago">Miles ago</string>
+    <string name="months_ago">Months ago</string>
+    <string name="type">Type</string>
+    <string name="title_hint">Title (e.g. "Steel front bumper")</string>
+    <string name="notes_hint">Notes (brand, part numbers, where you bought it)</string>
+    <string name="photos">Photos (receipts, parts, install shots)</string>
+    <string name="camera">Camera</string>
+    <string name="gallery">Gallery</string>
+    <string name="save_record">Save Record</string>
+
+    <!-- Debug Log -->
+    <string name="refresh">Refresh</string>
+    <string name="share">Share</string>
+    <string name="clear">Clear</string>
+
+    <!-- History -->
+    <string name="no_history">No maintenance or upgrades logged yet</string>
 </resources>

@@ -1,111 +1,136 @@
 # AutoSentry
 
-AutoSentry turns a phone or tablet and a Bluetooth OBD-II adapter into a vehicle-aware diagnostic monitor, a mileage-and-hours-based maintenance tracker, and a real-time trip computer — built first for a 2000 Ford F-250 7.3L Power Stroke, but designed to support other vehicles through configurable PID profiles.
+**FORScan meets CARFAX, built for the 7.3L Power Stroke.**
 
-The whole point is zero change to the driver's habits. Pair the OBD adapter once. The adapter remains asleep while the truck is off, wakes when the key is turned to the **ON** position, and drops its connection when the truck shuts off. AutoSentry reacts to that connection automatically, so the driver does not have to remember to open the app or start a trip. This captures the key-on and cranking period that a manual app workflow can miss.
+Pair an OBDLink adapter once. From then on, every time the key turns and the
+wait-to-start light comes on, AutoSentry wakes up and records the truck.
+It tracks mileage and engine hours and warns you before maintenance is due.
+When a service comes due, it shows you the parts for that job. It also keeps
+a service history, backed by receipts, that you can show a buyer when you
+sell the truck.
 
-## What it does today
+---
 
-- **Vehicle data monitoring** — live PIDs, DTC reading (stored/pending/permanent), and a vehicle-specific diagnostic data layer. Default signals are selected for the 7.3L Power Stroke, while the PID system is intended to allow users to add, remove, and customize monitored values.
-- **7.3L thermal monitoring** — this truck's important engine-temperature signal is engine oil temperature, not a generic coolant-temperature assumption. Ford-enhanced PID support is used where available, and unavailable signals are reported honestly rather than replaced with guesses.
-- **Oil life that actually moves** — degrades in real time from accumulated mileage against the 7.3L service schedule (3,000 mi severe / 5,000 mi normal), with engine hours, idling, and engine oil temperature used to identify additional severe-duty conditions. The app treats mileage and engine hours as separate usage measurements; it does not invent an unsupported factory engine-hour interval.
-- **Service reminders** — oil and filter, fuel filter, air filter, transmission service, transfer case, front/rear differential, coolant service, lubrication, inspections, and common age- or mileage-based wear items can be tracked. Notifications identify approaching, due, and overdue service.
-- **GPS-based trip computer** — speed, distance, and real-time MPG computed from MAF airflow and GPS speed. Every automatically detected trip is logged with distance, fuel used, and average MPG.
-- **Automatic key-on tracking** — the adapter is expected to be asleep with the truck off. When the key reaches ON and the adapter wakes, the manifest-registered Bluetooth receiver starts the foreground monitor even if the app was not open. When the truck shuts off and the adapter disconnects, the trip is closed.
-- **Honest data status** — connection loss, missing PID responses, stale readings, unsupported vehicle data, and degraded monitoring are surfaced to the user. AutoSentry does not silently present simulator data as real vehicle data.
-- **Maintenance history with evidence** — users enter maintenance they performed and may attach receipts, parts photos, or installation photos. Records are labeled according to their evidence rather than being treated as verified merely because the user entered them.
-- **On-device debug log** — crashes and errors are written to a local log that can be viewed and shared from the app.
+## The problem
 
-## 2000 F-250 7.3L maintenance model
+- 7.3L trucks are 20+ years old and sell for close to what they cost new.
+  Owners keep them running with strict, disciplined maintenance.
+- Service records live in memory, shoeboxes, and spreadsheets. CARFAX only
+  sees work done by dealers and shops, so driveway maintenance and upgrades
+  never show up.
+- OBD apps get opened once and forgotten. When the truck acts up, nobody
+  was recording.
 
-The maintenance schedule is a starting point, not a substitute for the truck's owner's manual, diesel supplement, service manual, component instructions, or a qualified inspection. Exact equipment, drivetrain, axle, transmission, operating environment, and prior repairs matter.
+## The solution
 
-### Every oil service / regular inspection
+### Zero friction
+- Connect the adapter once. After that, key on means monitoring on.
+  There's no app to open and no trip to start.
+- Recording starts at key-on, so cranking and hard-start data is already
+  saved when a crank/no-start happens.
+- When something sounds off, the owner opens the app and nothing is missing.
 
-- Change engine oil and filter at the selected normal or severe-duty interval.
-- Inspect for oil, coolant, fuel, transmission, transfer-case, differential, power-steering, and brake-fluid leaks.
-- Inspect radiator, heater, turbo/intercooler, and other engine hoses for cracks, swelling, softness, abrasion, and leaks.
-- Inspect the serpentine belt, tensioner, pulleys, and wiring.
-- Inspect battery terminals, cables, grounds, charging behavior, and starting performance.
-- Inspect steering, suspension, wheel ends, brakes, tires, exhaust, and driveline components.
-- Lubricate every serviceable grease fitting found on the specific truck, including steering linkage/ball-joint fittings and driveshaft slip-yoke or U-joint fittings where equipped. Some replacement parts are sealed, so the app must not claim a grease point exists unless the user or vehicle profile confirms it.
+### Dashboard
+- Live readings the owner chooses as important to them.
+- Engine hour and mileage tracking.
 
-Grease matters because a fitting supplies lubricant to a serviceable joint or bearing. A dry steering joint can develop play and affect control; a dry U-joint or slip yoke can cause vibration, wear, and driveline failure. Excess grease should be wiped away because it attracts dirt and can damage seals.
+### Maintenance tracking
+- On first setup, the owner estimates when each item was last serviced.
+  Every item is tracked from day one, and the estimates are labeled as estimates.
+- Every maintenance category tracks its own miles, engine hours, and time
+  since last service. Whichever limit comes first sets the due date.
+- Oil is the most frequent item, not a special case.
+- Fuel filter: every other oil change while running the stock filter.
+- Alerts fire before service is due, early enough to order parts and have
+  them arrive in time.
 
-### Mileage- and usage-based items
+### Verified history
+- Log maintenance and upgrades with receipts and photos.
+- Each record shows how it was verified:
+  - Bought through AutoSentry: confirmed by order data
+  - Receipt matched to the owner (e.g., last 4 of the card)
+  - Receipt plus photo of the installed part
+  - Receipt attached, not matched (gifted parts)
+  - Estimated / self-reported
+- Resale report: a CARFAX-style report for your truck, including DIY work,
+  backed by miles and hours the app recorded itself.
 
-- **Engine oil and filter:** use the selected service interval; severe use includes towing, extended idling, heavy loads, dusty/off-road operation, low-speed work, and extreme temperatures.
-- **Fuel filter:** replace at the scheduled interval and sooner when contaminated fuel, water, restriction, or fuel-delivery symptoms are found. Clean fuel is especially important to diesel injection components.
-- **Air filter:** inspect regularly and replace when restricted, damaged, or loaded with dust. A restricted filter can reduce airflow and affect performance.
-- **Automatic transmission fluid and filter:** service according to transmission, fluid specification, and normal/severe use. Towing and heat increase fluid stress.
-- **Transfer-case fluid:** service if equipped and use the correct fluid for that transfer case.
-- **Front and rear differential fluid:** inspect for leaks and water contamination; service more often after towing, deep water, or severe duty.
-- **Coolant system:** use the correct diesel-compatible coolant and maintenance method. Check level, concentration or additive requirements, hoses, cap, radiator, and evidence of contamination or electrolysis.
-- **Tires:** check pressure, tread, sidewalls, age, load rating, and uneven wear. Rotate according to tire and drivetrain requirements, and investigate alignment or suspension problems instead of simply rotating around them.
-- **Brakes:** inspect pad/shoe thickness, rotors/drums, calipers, hardware, hoses, lines, parking brake, and fluid. Brake replacement is condition-based, not safely determined by mileage alone.
+## Business model
 
-### Age-based items
+- **Supplier placement (primary):** parts suppliers pay to be in front of
+  owners at the moment a service comes due. These are high-intent buyers:
+  maintenance is a necessity to keep the truck on the road, not an
+  impulse buy.
+- **Affiliate commission** on parts bought through the app.
+- **Resale report:** a one-time purchase when the owner sells.
+- **Trust rule:** only recommend quality parts at a better price, and label
+  sponsored placements. One bad part recommendation costs the community's
+  trust for good.
 
-Vehicle age increases the chance of deterioration even when mileage is low. A VIN/build date can establish vehicle age, but it cannot prove the condition of a part. The app should use age to create an inspection or replacement reminder, not claim that a component has failed.
+## Why the 7.3L first
 
-Pay particular attention to:
+- Owners are loyal to proper maintenance and keep these trucks for life.
+- They already think in engine hours and miles, and already keep records.
+- The community is tight: forums, Facebook groups, and YouTube channels,
+  where word of mouth moves fast.
+- There's no good software for them. FORScan diagnoses but doesn't track
+  maintenance. CARFAX doesn't know engine hours or DIY work.
+- It's a rebellion against new vehicles: keep the truck you trust running
+  forever.
 
-- radiator and heater hoses
-- turbo/intercooler hoses and clamps
-- serpentine belt, tensioner, and pulleys
-- batteries and cables
-- coolant, brake, transmission, transfer-case, and differential fluids
-- rubber steering, suspension, and driveline components
-- seals, boots, wiring insulation, and corrosion-prone areas
-- tires, including date code and sidewall condition
+## Why it wins
 
-Aged hoses and belts can fail suddenly. A preventive inspection lets the owner find swelling, hardening, cracking, abrasion, or oil contamination before a roadside failure. The app should explain whether a reminder is based on age, mileage, engine hours, a measured PID trend, or a user-entered maintenance record.
+1. **Zero friction:** it fits into starting the truck. There's nothing to
+   remember.
+2. **It owns the service history:** months of verified records mean owners
+   don't switch.
+3. **Nobody else has this data:** miles and engine hours the app measured,
+   tied to verified service records.
 
-### Why the app distinguishes facts from recommendations
+## Principles
 
-AutoSentry separates:
+- Show only real data. Measured, recorded, calculated, estimated, and
+  unavailable are always labeled as such.
+- Alerts must be accurate. The community forgives nothing.
 
-- **Measured:** a value returned by the vehicle or adapter, with timestamp and trip context.
-- **Recorded:** a service event entered by the owner, with optional receipt or photo evidence.
-- **Calculated:** mileage, engine hours, service-life percentage, or trend derived from stored data.
-- **Recommended:** an inspection, service, part, or provider suggested because a documented threshold has been approached.
-- **Unavailable:** a PID or vehicle signal that did not return valid data.
+## What we're adding
 
-This keeps the maintenance notebook useful without pretending that a mileage estimate, a VIN age calculation, or a single PID reading is proof of component condition.
+**Already working:** auto-start at key-on, live dashboard, trip MPG,
+mileage and engine-hour tracking, oil life, service schedule with
+due-soon alerts, and a maintenance log with photos.
 
-## Architecture
+**In progress, in priority order:**
 
-```
-obd/            ELM327Adapter, OBDSimulator (dev/testing), DTCReader, VINDetector
-                — adapter communication, vehicle responses, and code decoding
-engine/         OilLifeEngine — mileage, engine-hour, idle, and oil-temperature logic
-maintenance/    ServiceInterval, ServiceStatus, MaintenanceScheduleEngine
-                — vehicle service intervals and due-soon/overdue tracking
-fuel/           MpgCalculator — MAF + GPS speed -> instantaneous/interval MPG
-gps/            GpsTracker — LocationManager wrapper, no Play Services dependency
-service/        TrackingService — foreground OBD + GPS persistence and notifications
-receiver/       BluetoothConnectionReceiver — automatic start/stop on adapter state
-data/           Room entities/DAOs for PIDs, sessions, trip points, vehicle profile,
-                maintenance events, and photo attachments
-ui/             MainActivity, DebugLogActivity, LogMaintenanceActivity,
-                MaintenanceHistoryActivity
-```
+1. **Last-service estimates at setup.** Ask the owner when each item was
+   last done. Today an item with no record never alerts, so it never shows
+   a part.
+2. **One system for every item.** Oil moves into the general schedule
+   instead of running on its own.
+3. **Engine hours and time limits for every item.** Today most items count
+   miles only. Engine hours are tracked for oil only, and the month limits
+   are set but never checked, so a truck that sits never gets a
+   time-based alert.
+4. **Fuel filter rule.** Every other oil change on the stock filter, with
+   a stock vs. aftermarket filter setting.
+5. **Verification level on every record.** From "bought through
+   AutoSentry" down to "self-reported."
+6. **OBDLink recommendation in setup.** MX+ or LX. The app uses classic
+   Bluetooth, and the CX is Bluetooth Low Energy only, so it won't connect.
+7. **Crank/no-start snapshot on every start.** RPM, battery voltage, and
+   pressure if the truck reports it.
+8. **Fault codes on the Codes tab.** Built, not yet tested on the truck:
+   stored and pending codes read at every connect, a clear-codes button
+   (key on, engine off only), and 206 7.3L codes, each with its severity
+   and what to check shown right under it. The Truck Systems scan
+   (Dashboard tab) reports every module and PID this truck answers.
+9. **Deals tied to each service alert.** The right parts for the job
+   that's coming due.
+10. **Resale report export.** A PDF of the verified service history.
+11. **Opt-in anonymous data sharing.** Needed to show suppliers how many
+    trucks are coming due for each part. The app keeps all data on the
+    phone today.
 
-All storage is local (Room + SharedPreferences). No account or cloud dependency is required for the monitoring workflow.
+## Roadmap
 
-## Building
-
-```bash
-./gradlew assembleRelease
-```
-
-Outputs to `app/build/outputs/apk/release/app-release.apk`, signed with the Android debug key (fine for sideloading onto a test device; not intended for store distribution as-is).
-
-## Planned directions
-
-- Configurable PID catalog with vehicle-specific defaults and user-selected signals.
-- KOEO capture and crank/no-start reports based on the values the truck actually returns.
-- PID availability, stale-data, and drift detection with evidence-backed notifications.
-- Receipt capture and clearer maintenance evidence states.
-- Vehicle-specific maintenance profiles for additional makes, models, engines, and drivetrains.
-- Opt-in connections to parts suppliers, mobile mechanics, and repair shops when a documented service interval creates a high-intent maintenance need.
+- Other makes, models, and engines through configurable vehicle profiles.
+- Direct supplier partnerships once the numbers show demand.

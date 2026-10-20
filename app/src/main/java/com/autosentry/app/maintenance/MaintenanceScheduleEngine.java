@@ -8,42 +8,39 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Computes %-of-service-life used for every tracked item, against the
- * manufacturer intervals in ServiceInterval. The 80% "dueSoon" threshold
- * is what TrackingService watches to fire the early-warning notification
- * the old app never had.
+ * Computes %-of-service-life used for every tracked item against the
+ * intervals in ServiceInterval — by miles AND by months, whichever is worse.
+ *
+ * Items with no logged service count from when AutoSentry started tracking
+ * (the app odometer starts at 0 on install), so a high-mile truck isn't
+ * flooded with "8,000% overdue" on day one. The row says "not logged yet"
+ * so the owner knows to record the last time it was really done.
  */
 public final class MaintenanceScheduleEngine {
     public static final double DUE_SOON_THRESHOLD_PERCENT = 80.0;
+    private static final double MS_PER_MONTH = 30.4375 * 24 * 60 * 60 * 1000;
 
     private MaintenanceScheduleEngine() {}
 
-    public static ServiceStatus computeStatus(ServiceItemType type, VehicleProfile profile, MaintenanceDao dao) {
+    public static ServiceStatus computeStatus(ServiceItemType type, VehicleProfile profile, MaintenanceDao dao,
+                                              long trackingStartMillis) {
         ServiceInterval interval = ServiceInterval.of(type);
         MaintenanceEvent lastEvent = dao.getMostRecentOfType(type.name());
 
         double baselineOdometer = lastEvent != null ? lastEvent.odometerAtEvent : 0;
+        long baselineTime = lastEvent != null ? lastEvent.timestamp : trackingStartMillis;
         double milesSince = Math.max(0, profile.odometerMiles - baselineOdometer);
+        double monthsSince = Math.max(0, (System.currentTimeMillis() - baselineTime) / MS_PER_MONTH);
 
-        int intervalMiles = interval.miles(profile.severeDuty);
-        double percent = intervalMiles > 0 ? (milesSince / intervalMiles) * 100.0 : 0;
-
-        return new ServiceStatus(type, interval.displayName, milesSince, intervalMiles, percent);
+        return new ServiceStatus(interval, milesSince, interval.miles(profile.severeDuty),
+                monthsSince, interval.months(profile.severeDuty), lastEvent != null);
     }
 
-    public static List<ServiceStatus> computeAll(VehicleProfile profile, MaintenanceDao dao) {
+    public static List<ServiceStatus> computeAll(VehicleProfile profile, MaintenanceDao dao, long trackingStartMillis) {
         List<ServiceStatus> statuses = new ArrayList<>();
         for (ServiceItemType type : ServiceInterval.allTypes()) {
-            statuses.add(computeStatus(type, profile, dao));
+            statuses.add(computeStatus(type, profile, dao, trackingStartMillis));
         }
         return statuses;
-    }
-
-    public static List<ServiceStatus> dueSoonOrOverdue(VehicleProfile profile, MaintenanceDao dao) {
-        List<ServiceStatus> result = new ArrayList<>();
-        for (ServiceStatus status : computeAll(profile, dao)) {
-            if (status.dueSoon) result.add(status);
-        }
-        return result;
     }
 }

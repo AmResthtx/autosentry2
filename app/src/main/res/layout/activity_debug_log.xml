@@ -3,19 +3,27 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:background="@color/dashboard_bg"
     android:padding="16dp">
 
+    <!-- Toolbar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:background="@color/card_bg"
+        android:padding="8dp"
+        android:layout_marginBottom="12dp">
 
         <Button
             android:id="@+id/buttonRefreshLog"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Refresh" />
+            android:text="@string/refresh"
+            android:textColor="@color/textPrimary"
+            android:backgroundTint="@color/card_border"
+            android:textAllCaps="false" />
 
         <Button
             android:id="@+id/buttonShareLog"
@@ -23,7 +31,10 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Share" />
+            android:text="@string/share"
+            android:textColor="@color/textPrimary"
+            android:backgroundTint="@color/card_border"
+            android:textAllCaps="false" />
 
         <Button
             android:id="@+id/buttonClearLog"
@@ -31,15 +42,21 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Clear" />
+            android:text="@string/clear"
+            android:textColor="@color/textPrimary"
+            android:backgroundTint="@color/red_alert"
+            android:textAllCaps="false" />
 
     </LinearLayout>
 
+    <!-- Log Content -->
     <ScrollView
+        android:id="@+id/scrollLog"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="12dp">
+        android:background="@color/card_bg"
+        android:padding="12dp">
 
         <TextView
             android:id="@+id/textLogContent"
@@ -47,6 +64,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textSize="12sp"
+            android:textColor="@color/reading_text"
             android:textIsSelectable="true"
             android:text="Loading..." />
 

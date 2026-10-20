@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -13,6 +14,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.util.TypedValue;
 import android.view.View;
 import android.widget.Button;
 import android.widget.GridLayout;
@@ -24,17 +26,22 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
-import com.autosentry.app.data.MaintenanceEvent;
 import com.autosentry.app.data.VehicleProfile;
 import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
-import com.autosentry.app.maintenance.ServiceItemType;
+import com.autosentry.app.maintenance.ServiceInterval;
 import com.autosentry.app.maintenance.ServiceStatus;
+import com.autosentry.app.obd.DTCReader;
+import com.autosentry.app.obd.DiagnosticCodes;
+import com.autosentry.app.obd.DtcSeverity;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
 
+import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,13 +51,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Two tabs: Dashboard (live readings the user picks via "Edit Dashboard",
- * plus adapter setup) and Service (oil life and the full service schedule,
- * driven by engine-on time and distance).
+ * Three tabs: Dashboard (live readings the user picks via "Edit Dashboard",
+ * plus adapter setup), Service (oil life and the full service schedule,
+ * driven by engine-on time and distance), and Codes (trouble codes from the
+ * truck, each with its meaning spelled out underneath).
  */
 public class MainActivity extends AppCompatActivity {
     private static final long REFRESH_INTERVAL_MS = 500L;
     private static final long DB_REFRESH_INTERVAL_MS = 1500L;
+    private static final int TAB_DASHBOARD = 0, TAB_SERVICE = 1, TAB_CODES = 2;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -59,15 +68,23 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
     private long lastDbRefresh = 0;
     private volatile VehicleProfile lastProfile;
-    private boolean dashboardTabVisible = true;
+    private int currentTab = TAB_DASHBOARD;
 
     private final Map<Integer, TextView> tileValues = new HashMap<>();
     private GridLayout gridTiles;
-    private View scrollDashboard, scrollService;
-    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer, textServiceList;
-    private Button buttonTabDashboard, buttonTabService, buttonEditDashboard, buttonToggleTracking, buttonResetOil,
-            buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
-            buttonBackgroundAccess, buttonDebugLog;
+    private View scrollDashboard, scrollService, scrollCodes;
+    private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer,
+            textMilStatus, textCodesScanInfo;
+    private LinearLayout layoutServiceList, layoutCodesList;
+    private String lastServiceListSignature = "";
+    private String lastCodesSignature = "";
+    private DiagnosticCodes.Scan savedCodeScan;
+    private Button buttonTabDashboard, buttonTabService, buttonTabCodes, buttonEditDashboard, buttonToggleTracking,
+            buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
+            buttonBackgroundAccess, buttonSystemsScan, buttonDebugLog, buttonScanCodes, buttonClearCodes;
+
+    /** Set by the service-alert notification so tapping it lands on the Service tab. */
+    public static final String EXTRA_OPEN_SERVICE_TAB = "open_service_tab";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,18 +96,24 @@ public class MainActivity extends AppCompatActivity {
         gridTiles = findViewById(R.id.gridTiles);
         scrollDashboard = findViewById(R.id.scrollDashboard);
         scrollService = findViewById(R.id.scrollService);
+        scrollCodes = findViewById(R.id.scrollCodes);
+        textMilStatus = findViewById(R.id.textMilStatus);
+        textCodesScanInfo = findViewById(R.id.textCodesScanInfo);
+        layoutCodesList = findViewById(R.id.layoutCodesList);
+        buttonTabCodes = findViewById(R.id.buttonTabCodes);
+        buttonScanCodes = findViewById(R.id.buttonScanCodes);
+        buttonClearCodes = findViewById(R.id.buttonClearCodes);
+        buttonSystemsScan = findViewById(R.id.buttonSystemsScan);
         textAdapterStatus = findViewById(R.id.textAdapterStatus);
         textLiveStatus = findViewById(R.id.textLiveStatus);
         textOilLife = findViewById(R.id.textOilLife);
         textOilDetail = findViewById(R.id.textOilDetail);
         textOdometer = findViewById(R.id.textOdometer);
-        textServiceList = findViewById(R.id.textServiceList);
+        layoutServiceList = findViewById(R.id.layoutServiceList);
         buttonTabDashboard = findViewById(R.id.buttonTabDashboard);
         buttonTabService = findViewById(R.id.buttonTabService);
         buttonEditDashboard = findViewById(R.id.buttonEditDashboard);
         buttonToggleTracking = findViewById(R.id.buttonToggleTracking);
-        buttonResetOil = findViewById(R.id.buttonResetOil);
-        buttonLogMaintenance = findViewById(R.id.buttonLogMaintenance);
         buttonMaintenanceHistory = findViewById(R.id.buttonMaintenanceHistory);
         buttonPairAdapter = findViewById(R.id.buttonPairAdapter);
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
@@ -101,12 +124,14 @@ public class MainActivity extends AppCompatActivity {
             PermissionFlow.requestAllPermissions(this);
         }
 
-        buttonTabDashboard.setOnClickListener(v -> showTab(true));
-        buttonTabService.setOnClickListener(v -> showTab(false));
+        buttonTabDashboard.setOnClickListener(v -> showTab(TAB_DASHBOARD));
+        buttonTabService.setOnClickListener(v -> showTab(TAB_SERVICE));
+        buttonTabCodes.setOnClickListener(v -> showTab(TAB_CODES));
+        buttonScanCodes.setOnClickListener(v -> requestCodeScan());
+        buttonClearCodes.setOnClickListener(v -> confirmClearCodes());
+        buttonSystemsScan.setOnClickListener(v -> startActivity(new Intent(this, SystemsScanActivity.class)));
         buttonEditDashboard.setOnClickListener(v -> showEditDashboard());
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
-        buttonResetOil.setOnClickListener(v -> resetOilLife());
-        buttonLogMaintenance.setOnClickListener(v -> startActivity(new Intent(this, LogMaintenanceActivity.class)));
         buttonMaintenanceHistory.setOnClickListener(v -> startActivity(new Intent(this, MaintenanceHistoryActivity.class)));
         buttonPairAdapter.setOnClickListener(v -> pickObdAdapter());
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());
@@ -114,7 +139,8 @@ public class MainActivity extends AppCompatActivity {
         buttonDebugLog.setOnClickListener(v -> startActivity(new Intent(this, DebugLogActivity.class)));
 
         rebuildTiles();
-        showTab(true);
+        savedCodeScan = AppSettings.getLastCodeScan(this);
+        showTab(getIntent().getBooleanExtra(EXTRA_OPEN_SERVICE_TAB, false) ? TAB_SERVICE : TAB_DASHBOARD);
 
         ioExecutor.execute(() -> {
             if (db.vehicleProfileDao().getSync() == null) {
@@ -152,13 +178,19 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showTab(boolean dashboard) {
-        dashboardTabVisible = dashboard;
-        scrollDashboard.setVisibility(dashboard ? View.VISIBLE : View.GONE);
-        scrollService.setVisibility(dashboard ? View.GONE : View.VISIBLE);
-        buttonTabDashboard.setEnabled(!dashboard);
-        buttonTabService.setEnabled(dashboard);
+    private void showTab(int tab) {
+        currentTab = tab;
+        View[] pages = {scrollDashboard, scrollService, scrollCodes};
+        Button[] buttons = {buttonTabDashboard, buttonTabService, buttonTabCodes};
+        ColorStateList selected = ColorStateList.valueOf(getColor(R.color.colorPrimary));
+        ColorStateList idle = ColorStateList.valueOf(getColor(R.color.card_border));
+        for (int i = 0; i < pages.length; i++) {
+            pages[i].setVisibility(i == tab ? View.VISIBLE : View.GONE);
+            buttons[i].setEnabled(i != tab);
+            buttons[i].setBackgroundTintList(i == tab ? selected : idle);
+        }
         lastDbRefresh = 0; // refresh the service tab right away
+        lastCodesSignature = ""; // and the codes tab
     }
 
     /** Start/stop by hand. Without a paired adapter this runs the simulator, for testing. */
@@ -277,24 +309,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void resetOilLife() {
-        ioExecutor.execute(() -> {
-            VehicleProfile profile = db.vehicleProfileDao().getSync();
-            if (profile == null) return;
-            profile.oilLifePercent = 100.0;
-            profile.milesSinceOilChange = 0;
-            profile.engineHoursSinceOilChange = 0;
-            profile.lastOilResetTimestamp = System.currentTimeMillis();
-            db.vehicleProfileDao().update(profile);
-
-            MaintenanceEvent event = new MaintenanceEvent();
-            event.type = ServiceItemType.OIL_FILTER.name();
-            event.notes = "Logged from dashboard";
-            event.timestamp = System.currentTimeMillis();
-            event.odometerAtEvent = profile.odometerMiles;
-            db.maintenanceDao().insert(event);
-            lastDbRefresh = 0;
-        });
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getBooleanExtra(EXTRA_OPEN_SERVICE_TAB, false)) showTab(TAB_SERVICE);
     }
 
     @Override
@@ -313,6 +332,7 @@ public class MainActivity extends AppCompatActivity {
     private void refresh() {
         updateLiveStatus();
         updateTiles();
+        if (currentTab == TAB_CODES) updateCodesTab();
         long now = System.currentTimeMillis();
         if (now - lastDbRefresh >= DB_REFRESH_INTERVAL_MS) {
             lastDbRefresh = now;
@@ -455,21 +475,17 @@ public class MainActivity extends AppCompatActivity {
 
     /** Service tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
-        final boolean needServiceList = !dashboardTabVisible;
+        final boolean needServiceList = currentTab == TAB_SERVICE;
+        final long trackingStart = AppSettings.getMaintenanceTrackingStart(this);
+        final Set<String> hidden = AppSettings.getHiddenServiceItems(this);
         ioExecutor.execute(() -> {
             VehicleProfile profile = db.vehicleProfileDao().getSync();
             if (profile == null) return;
             lastProfile = profile;
 
-            StringBuilder sb = new StringBuilder();
-            if (needServiceList) {
-                List<ServiceStatus> statuses = MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao());
-                for (ServiceStatus status : statuses) {
-                    String flag = status.overdue ? "  — OVERDUE" : (status.dueSoon ? "  — DUE SOON" : "");
-                    sb.append(String.format(Locale.US, "%s\n    %.0f%% used, %,.0f mi remaining%s\n",
-                            status.displayName, status.percentOfLifeUsed, status.milesRemaining(), flag));
-                }
-            }
+            List<ServiceStatus> statuses = needServiceList
+                    ? MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao(), trackingStart)
+                    : null;
 
             uiHandler.post(() -> {
                 textOilLife.setText(String.format(Locale.US, "Oil life: %.0f%%", profile.oilLifePercent));
@@ -477,8 +493,328 @@ public class MainActivity extends AppCompatActivity {
                 textOilDetail.setText(String.format(Locale.US,
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));
-                if (needServiceList) textServiceList.setText(sb.toString());
+                if (statuses != null) renderServiceList(statuses, hidden);
             });
         });
+    }
+
+    /**
+     * One tappable row per service: tap to record it, long-press to hide it.
+     * Anything due floats to a "Needs attention" group on top; the rest sit
+     * under their category. Only rebuilt when something visible changed, so
+     * the 1.5 s refresh doesn't eat taps.
+     */
+    private void renderServiceList(List<ServiceStatus> statuses, Set<String> hidden) {
+        List<ServiceStatus> visible = new ArrayList<>();
+        List<ServiceStatus> attention = new ArrayList<>();
+        StringBuilder signature = new StringBuilder(hidden.toString());
+        for (ServiceStatus s : statuses) {
+            if (hidden.contains(s.type.name())) continue;
+            visible.add(s);
+            if (s.dueSoon) attention.add(s);
+            signature.append('|').append(serviceSubtitle(s));
+        }
+        if (signature.toString().equals(lastServiceListSignature)) return;
+        lastServiceListSignature = signature.toString();
+
+        Collections.sort(attention, (a, b) -> Double.compare(b.percentOfLifeUsed, a.percentOfLifeUsed));
+        layoutServiceList.removeAllViews();
+
+        if (!attention.isEmpty()) {
+            addSectionHeader("Needs attention");
+            for (ServiceStatus s : attention) addServiceRow(s);
+        }
+        for (ServiceInterval.Category category : ServiceInterval.Category.values()) {
+            boolean headerAdded = false;
+            for (ServiceStatus s : visible) {
+                if (s.interval.category != category || s.dueSoon) continue;
+                if (!headerAdded) {
+                    addSectionHeader(category.label);
+                    headerAdded = true;
+                }
+                addServiceRow(s);
+            }
+        }
+
+        addSectionHeader("Other");
+        addRow(Color.parseColor("#9E9E9E"), "Upgrade or other work",
+                "Mods, repairs, anything not on the schedule", Color.parseColor("#757575"),
+                v -> openServiceRecord("OTHER"), null);
+        if (!hidden.isEmpty()) {
+            addRow(Color.TRANSPARENT, "Show " + hidden.size() + " hidden item" + (hidden.size() == 1 ? "" : "s"),
+                    "Brings back services you hid", Color.parseColor("#757575"),
+                    v -> {
+                        AppSettings.clearHiddenServiceItems(this);
+                        lastDbRefresh = 0;
+                    }, null);
+        }
+    }
+
+    private void addServiceRow(ServiceStatus s) {
+        int color = s.overdue ? Color.parseColor("#D32F2F")
+                : s.dueSoon ? Color.parseColor("#F57C00")
+                : Color.parseColor("#43A047");
+        int subtitleColor = s.overdue || s.dueSoon ? color : Color.parseColor("#757575");
+        addRow(color, s.displayName, serviceSubtitle(s), subtitleColor,
+                v -> openServiceRecord(s.type.name()),
+                v -> {
+                    confirmHide(s);
+                    return true;
+                });
+    }
+
+    private static String serviceSubtitle(ServiceStatus s) {
+        String state = s.overdue ? "OVERDUE" : (s.dueSoon ? "Due soon" : String.format(Locale.US, "%.0f%% used", s.percentOfLifeUsed));
+        String line = s.interval.action.verb + " · " + state;
+        String remaining = s.remainingText();
+        if (!remaining.isEmpty()) line += " · " + remaining;
+        if (!s.hasRecord) line += " · not logged yet";
+        return line;
+    }
+
+    private void addSectionHeader(String label) {
+        float density = getResources().getDisplayMetrics().density;
+        TextView header = new TextView(this);
+        header.setText(label.toUpperCase(Locale.US));
+        header.setTextSize(12);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setTextColor(Color.parseColor("#757575"));
+        header.setLetterSpacing(0.06f);
+        header.setPadding(0, Math.round(18 * density), 0, Math.round(4 * density));
+        layoutServiceList.addView(header);
+    }
+
+    private void addRow(int stripColor, String title, String subtitle, int subtitleColor,
+                        View.OnClickListener onClick, View.OnLongClickListener onLongClick) {
+        float density = getResources().getDisplayMetrics().density;
+        int pad = Math.round(12 * density);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(Math.round(56 * density));
+        TypedValue ripple = new TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        row.setBackgroundResource(ripple.resourceId);
+        row.setClickable(true);
+        row.setOnClickListener(onClick);
+        if (onLongClick != null) row.setOnLongClickListener(onLongClick);
+
+        View strip = new View(this);
+        GradientDrawable stripShape = new GradientDrawable();
+        stripShape.setColor(stripColor);
+        stripShape.setCornerRadius(2 * density);
+        strip.setBackground(stripShape);
+        LinearLayout.LayoutParams stripLp = new LinearLayout.LayoutParams(Math.round(4 * density), Math.round(36 * density));
+        stripLp.setMarginEnd(pad);
+        row.addView(strip, stripLp);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(0, pad / 2, 0, pad / 2);
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextSize(16);
+        titleView.setTypeface(null, Typeface.BOLD);
+        TextView subtitleView = new TextView(this);
+        subtitleView.setText(subtitle);
+        subtitleView.setTextSize(13);
+        subtitleView.setTextColor(subtitleColor);
+        texts.addView(titleView);
+        texts.addView(subtitleView);
+        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView chevron = new TextView(this);
+        chevron.setText("›");
+        chevron.setTextSize(22);
+        chevron.setTextColor(Color.parseColor("#9E9E9E"));
+        chevron.setPadding(pad, 0, Math.round(4 * density), 0);
+        row.addView(chevron);
+
+        layoutServiceList.addView(row);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.parseColor("#1F000000"));
+        layoutServiceList.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+    }
+
+    // ---------------------------------------------------------------- Codes tab
+
+    private void requestCodeScan() {
+        if (!AppSettings.hasObdAdapterConfigured(this)) {
+            Toast.makeText(this, "Pair your OBD adapter on the Dashboard tab first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        DiagnosticCodes.request(DiagnosticCodes.Request.SCAN);
+        if (!TrackingService.isRunning) startTrackingService();
+        lastCodesSignature = "";
+    }
+
+    private void confirmClearCodes() {
+        if (!TrackingService.isRunning) {
+            Toast.makeText(this, "Turn the key on and tap Scan for Codes first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (LiveReadings.engineRunning) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Shut the engine off first")
+                    .setMessage("Ford's procedure is key on, engine off. Turn the engine off, leave the key on, then clear.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Clear trouble codes?")
+                .setMessage("This erases the codes, the freeze-frame data saved with them, and resets the readiness "
+                        + "monitors (P1000 shows until the truck has been driven enough). If the problem isn't fixed, "
+                        + "the codes come back. Write them down first if a mechanic will need them.")
+                .setPositiveButton("Clear Codes", (d, w) -> {
+                    DiagnosticCodes.request(DiagnosticCodes.Request.CLEAR);
+                    lastCodesSignature = "";
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Rebuilt only when something on it changed, like the service list. */
+    private void updateCodesTab() {
+        DiagnosticCodes.Scan scan = DiagnosticCodes.lastScan != null ? DiagnosticCodes.lastScan : savedCodeScan;
+        boolean busy = DiagnosticCodes.busy;
+        String message = DiagnosticCodes.message;
+        boolean running = TrackingService.isRunning;
+        boolean paired = AppSettings.hasObdAdapterConfigured(this);
+        String signature = (scan == null ? "-" : scan.serialize()) + '|' + busy + '|' + message + '|' + running + '|' + paired;
+        if (signature.equals(lastCodesSignature)) return;
+        lastCodesSignature = signature;
+
+        if (scan == null) {
+            textMilStatus.setText("Not scanned yet");
+            textMilStatus.setTextColor(getColor(R.color.cyan_display));
+        } else {
+            String count = scan.codes.isEmpty() ? "no codes"
+                    : scan.codes.size() + (scan.codes.size() == 1 ? " code" : " codes");
+            if (scan.milOn == null) {
+                textMilStatus.setText("Not reported · " + count);
+                textMilStatus.setTextColor(getColor(R.color.cyan_display));
+            } else {
+                textMilStatus.setText((scan.milOn ? "ON" : "OFF") + " · " + count);
+                textMilStatus.setTextColor(Color.parseColor(scan.milOn ? "#D32F2F" : "#43A047"));
+            }
+        }
+
+        String info;
+        if (busy) {
+            info = "Reading the truck…";
+        } else if (!paired) {
+            info = "Pair your OBD adapter on the Dashboard tab to read codes.";
+        } else if (scan == null) {
+            info = running ? "Codes are read automatically when the truck connects." : "Tracking is off. Scan for Codes turns it on.";
+        } else {
+            info = "Last scan " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                    .format(new Date(scan.timestamp)) + (running ? "" : " · tracking is off");
+        }
+        if (message != null && !busy) info = message + "\n" + info;
+        textCodesScanInfo.setText(info);
+
+        buttonScanCodes.setEnabled(!busy);
+        buttonClearCodes.setEnabled(!busy && scan != null && (!scan.codes.isEmpty() || Boolean.TRUE.equals(scan.milOn)));
+
+        layoutCodesList.removeAllViews();
+        if (scan == null) return;
+        if (scan.codes.isEmpty()) {
+            TextView none = new TextView(this);
+            none.setText("No stored or pending codes.");
+            none.setTextSize(16);
+            none.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
+            layoutCodesList.addView(none);
+            return;
+        }
+        for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
+    }
+
+    /** One code with everything it means written out underneath; nothing to tap through. */
+    private void addCodeRow(DTCReader.DtcRecord record) {
+        float density = getResources().getDisplayMetrics().density;
+        int pad = Math.round(12 * density);
+        int color = severityColor(record.severity);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+
+        View strip = new View(this);
+        GradientDrawable stripShape = new GradientDrawable();
+        stripShape.setColor(color);
+        stripShape.setCornerRadius(2 * density);
+        strip.setBackground(stripShape);
+        LinearLayout.LayoutParams stripLp = new LinearLayout.LayoutParams(Math.round(4 * density),
+                LinearLayout.LayoutParams.MATCH_PARENT);
+        stripLp.setMarginEnd(pad);
+        row.addView(strip, stripLp);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(0, pad, 0, pad);
+
+        TextView title = new TextView(this);
+        title.setText(record.code + "  " + record.title);
+        title.setTextSize(16);
+        title.setTypeface(null, Typeface.BOLD);
+        texts.addView(title);
+
+        TextView severity = new TextView(this);
+        severity.setText(record.severity.label + " · " + record.mode.label);
+        severity.setTextSize(14);
+        severity.setTypeface(null, Typeface.BOLD);
+        severity.setTextColor(color);
+        severity.setPadding(0, Math.round(2 * density), 0, 0);
+        texts.addView(severity);
+
+        addCodeDetail(texts, record.severity.explanation);
+        addCodeDetail(texts, record.mode.label + ": " + record.mode.explanation);
+        if (record.hint != null) addCodeDetail(texts, "What to check: " + record.hint);
+
+        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        layoutCodesList.addView(row);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.parseColor("#1F000000"));
+        layoutCodesList.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+    }
+
+    private void addCodeDetail(LinearLayout parent, String text) {
+        TextView detail = new TextView(this);
+        detail.setText(text);
+        detail.setTextSize(14);
+        detail.setTextColor(Color.parseColor("#9E9E9E"));
+        detail.setPadding(0, Math.round(4 * getResources().getDisplayMetrics().density), 0, 0);
+        parent.addView(detail);
+    }
+
+    private static int severityColor(DtcSeverity severity) {
+        switch (severity) {
+            case HIGH: return Color.parseColor("#D32F2F");
+            case MEDIUM: return Color.parseColor("#F57C00");
+            case LOW: return Color.parseColor("#FBC02D");
+            case INFO: return Color.parseColor("#9E9E9E");
+            default: return Color.parseColor("#78909C");
+        }
+    }
+
+    private void openServiceRecord(String type) {
+        startActivity(new Intent(this, LogMaintenanceActivity.class)
+                .putExtra(LogMaintenanceActivity.EXTRA_SERVICE_TYPE, type));
+    }
+
+    private void confirmHide(ServiceStatus s) {
+        new AlertDialog.Builder(this)
+                .setTitle("Hide " + s.displayName + "?")
+                .setMessage("Use this for services that don't apply to your truck (for example, transfer case on a 2WD). "
+                        + "Hidden items never send alerts. You can bring them back at the bottom of this list.")
+                .setPositiveButton("Hide", (d, w) -> {
+                    AppSettings.setServiceItemHidden(this, s.type.name(), true);
+                    lastDbRefresh = 0;
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 }

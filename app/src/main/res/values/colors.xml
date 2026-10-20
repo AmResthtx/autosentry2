@@ -1,13 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#2196F3</color>
-    <color name="colorPrimaryDark">#1976D2</color>
-    <color name="colorAccent">#00C853</color>
-    <color name="colorBackground">#FFFFFF</color>
-    <color name="colorSurface">#FFFFFF</color>
-    <color name="colorError">#B00020</color>
-    <color name="textPrimary">#212121</color>
-    <color name="textSecondary">#757575</color>
-    <color name="textDisabled">#BDBDBD</color>
-    <color name="green_start">#00C853</color>
-    <color name="gray_disabled">#BDBDBD</color>
+    <!-- Automotive Dark Theme -->
+    <color name="colorPrimary">#FF9800</color>
+    <color name="colorPrimaryDark">#F57C00</color>
+    <color name="colorAccent">#00BCD4</color>
+    <color name="colorBackground">#0D1117</color>
+    <color name="colorSurface">#161B22</color>
+    <color name="colorSurfaceVariant">#21262D</color>
+    <color name="colorError">#F44336</color>
+    <color name="textPrimary">#FFFFFF</color>
+    <color name="textSecondary">#8B949E</color>
+    <color name="textDisabled">#484F58</color>
+    <color name="green_start">#4CAF50</color>
+    <color name="gray_disabled">#484F58</color>
+
+    <!-- Dashboard-specific -->
+    <color name="dashboard_bg">#0D1117</color>
+    <color name="card_bg">#161B22</color>
+    <color name="card_border">#30363D</color>
+    <color name="amber_warning">#FF9800</color>
+    <color name="cyan_display">#00BCD4</color>
+    <color name="red_alert">#F44336</color>
+    <color name="green_ok">#4CAF50</color>
+    <color name="reading_text">#E6EDF3</color>
+    <color name="label_text">#8B949E</color>
+    <color name="divider">#30363D</color>
 </resources>

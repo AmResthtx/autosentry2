@@ -3,6 +3,7 @@ package com.autosentry.app.settings;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.PidCatalog;
 
 import java.util.ArrayList;
@@ -24,8 +25,64 @@ public final class AppSettings {
     private static final String KEY_SIMULATOR_MODE_ENABLED = "simulator_mode_enabled";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
+    private static final String KEY_TRACKING_START = "maintenance_tracking_start";
+    private static final String KEY_HIDDEN_SERVICES = "hidden_service_items";
+    private static final String KEY_LAST_CODE_SCAN = "last_code_scan";
+    private static final String KEY_ALERT_STAGE_PREFIX = "service_alert_stage_";
+    private static final String KEY_ALERT_TIME_PREFIX = "service_alert_time_";
 
     private AppSettings() {}
+
+    /**
+     * When AutoSentry started watching the maintenance schedule. Items with no
+     * logged service count their months from here (their miles already count
+     * from 0, since the app odometer starts at install).
+     */
+    public static long getMaintenanceTrackingStart(Context context) {
+        SharedPreferences p = prefs(context);
+        long start = p.getLong(KEY_TRACKING_START, 0);
+        if (start == 0) {
+            start = System.currentTimeMillis();
+            p.edit().putLong(KEY_TRACKING_START, start).apply();
+        }
+        return start;
+    }
+
+    /** Service items the owner long-pressed away ("doesn't apply to my truck"). Never shown or alerted. */
+    public static Set<String> getHiddenServiceItems(Context context) {
+        String stored = prefs(context).getString(KEY_HIDDEN_SERVICES, "");
+        Set<String> hidden = new HashSet<>();
+        for (String part : stored.split(",")) {
+            if (!part.trim().isEmpty()) hidden.add(part.trim());
+        }
+        return hidden;
+    }
+
+    public static void setServiceItemHidden(Context context, String type, boolean hidden) {
+        Set<String> current = getHiddenServiceItems(context);
+        if (hidden) current.add(type); else current.remove(type);
+        prefs(context).edit().putString(KEY_HIDDEN_SERVICES, android.text.TextUtils.join(",", current)).apply();
+    }
+
+    public static void clearHiddenServiceItems(Context context) {
+        prefs(context).edit().remove(KEY_HIDDEN_SERVICES).apply();
+    }
+
+    /** Last alert stage sent for an item (0 none, 1 due soon, 2 overdue) — survives app restarts so trips don't re-nag. */
+    public static int getServiceAlertStage(Context context, String type) {
+        return prefs(context).getInt(KEY_ALERT_STAGE_PREFIX + type, 0);
+    }
+
+    public static long getServiceAlertTime(Context context, String type) {
+        return prefs(context).getLong(KEY_ALERT_TIME_PREFIX + type, 0);
+    }
+
+    public static void setServiceAlertState(Context context, String type, int stage, long time) {
+        prefs(context).edit()
+                .putInt(KEY_ALERT_STAGE_PREFIX + type, stage)
+                .putLong(KEY_ALERT_TIME_PREFIX + type, time)
+                .apply();
+    }
 
     private static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -94,6 +151,15 @@ public final class AppSettings {
 
     public static void setSupportedPids(Context context, Set<Integer> pids) {
         prefs(context).edit().putString(KEY_SUPPORTED_PIDS, joinIds(new ArrayList<>(pids))).apply();
+    }
+
+    /** The last trouble-code scan, so the Codes tab has something to show with the truck off. */
+    public static DiagnosticCodes.Scan getLastCodeScan(Context context) {
+        return DiagnosticCodes.Scan.deserialize(prefs(context).getString(KEY_LAST_CODE_SCAN, null));
+    }
+
+    public static void setLastCodeScan(Context context, DiagnosticCodes.Scan scan) {
+        prefs(context).edit().putString(KEY_LAST_CODE_SCAN, scan.serialize()).apply();
     }
 
     private static List<Integer> parseIds(String stored) {

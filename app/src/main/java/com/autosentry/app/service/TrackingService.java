@@ -17,20 +17,21 @@ import com.autosentry.app.data.VehicleProfile;
 import com.autosentry.app.engine.OilLifeEngine;
 import com.autosentry.app.fuel.MpgCalculator;
 import com.autosentry.app.gps.GpsTracker;
-import com.autosentry.app.maintenance.MaintenanceScheduleEngine;
-import com.autosentry.app.maintenance.ServiceItemType;
-import com.autosentry.app.maintenance.ServiceStatus;
+import com.autosentry.app.maintenance.ServiceAlertPolicy;
 import com.autosentry.app.notifications.NotificationUtils;
+import com.autosentry.app.obd.DTCReader;
+import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.OBDSimulator;
 import com.autosentry.app.obd.PidCatalog;
+import com.autosentry.app.obd.SystemsScan;
+import com.autosentry.app.obd.TruckProbe;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -66,6 +67,9 @@ public class TrackingService extends Service {
     private static final double MAX_TICK_SECONDS = 5.0;
     // Renewed on every poll tick so it never outlives the service, but survives any one gap.
     private static final long WAKE_LOCK_TIMEOUT_MS = 60_000L;
+    // Oil temp moves slowly; reading it every 5 s keeps the bus free, which matters when each
+    // read is three commands (aim at the PCM, read, aim back).
+    private static final long FORD_OIL_TEMP_INTERVAL_MS = 5000L;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -84,9 +88,25 @@ public class TrackingService extends Service {
     private Set<Integer> supportedPids = Collections.emptySet();
     // True when the truck answers Ford's enhanced oil-temp PID (7.3L) instead of the standard one.
     private boolean fordOilTemp = false;
-    // Avoids re-notifying every tick once an item crosses 80%; cleared
-    // when the item is serviced (odometerAtEvent moves the baseline back).
-    private final Set<ServiceItemType> notifiedDueSoon = EnumSet.noneOf(ServiceItemType.class);
+    // Read trouble codes once every time the truck starts answering, so the Codes tab is never stale.
+    private boolean autoScanPending = false;
+    private long lastFordOilReadMs = 0;
+
+    // Adapter traffic for the debug log: connection setup, code reads and scans, never the
+    // 4-a-second poll. A repeat (key-off "NO DATA" every 5 s) is counted, not written again.
+    private String lastTraceLine = null;
+    private int traceRepeats = 0;
+    private final ELM327Adapter.Trace adapterTrace = (command, reply) -> {
+        String line = "> " + command + "   < " + TruckProbe.oneLine(reply);
+        if (line.equals(lastTraceLine)) {
+            traceRepeats++;
+            return;
+        }
+        if (traceRepeats > 0) AppLog.i(this, "Adapter", "(same exchange repeated " + traceRepeats + " more times)");
+        lastTraceLine = line;
+        traceRepeats = 0;
+        AppLog.i(this, "Adapter", line);
+    };
 
     private volatile double lastSpeedMph = 0;
     private volatile double lastLat = 0, lastLon = 0;
@@ -187,10 +207,18 @@ public class TrackingService extends Service {
                 long delay = POLL_INTERVAL_MS;
                 try {
                     if (stopped) return;
+                    if (useRealAdapter) realAdapter.setTrace(adapterTrace);
                     if (!ensureConnected() || !ensureTruckAnswering()) {
+                        dropRequests();
                         delay = RETRY_INTERVAL_MS;
                     } else {
-                        pollOnce();
+                        handleCodeRequest();
+                        if (handleSystemsScan()) {
+                            delay = RETRY_INTERVAL_MS; // reconnects first
+                        } else {
+                            if (useRealAdapter) realAdapter.setTrace(null);
+                            pollOnce();
+                        }
                     }
                 } catch (Exception e) {
                     AppLog.e(this, TAG, "Poll failed, will reconnect", e);
@@ -246,6 +274,7 @@ public class TrackingService extends Service {
             return false;
         }
         supportedPids = found;
+        autoScanPending = true;
         fordOilTemp = !found.contains(PidCatalog.ENGINE_OIL_TEMP)
                 && !Double.isNaN(realAdapter.readFordEngineOilTempC());
         // Offer "Engine Oil Temp" in the dashboard editor when either source works.
@@ -255,8 +284,116 @@ public class TrackingService extends Service {
         AppSettings.setSupportedPids(this, offered);
         AppLog.i(this, TAG, "Truck answered on " + realAdapter.describeProtocol()
                 + "; supported PIDs: " + describePids(found)
-                + "; Ford enhanced oil temp: " + (fordOilTemp ? "yes" : "no"));
+                + "; Ford enhanced oil temp: " + (fordOilTemp
+                        ? (realAdapter.usesPcmAddressing() ? "yes, addressed straight to the PCM" : "yes") : "no"));
         return true;
+    }
+
+    /** A Scan or Clear tap while the truck isn't answering gets told so instead of waiting silently. */
+    private void dropRequests() {
+        if (DiagnosticCodes.take() != DiagnosticCodes.Request.NONE) {
+            DiagnosticCodes.message = "Can't reach the truck. Turn the key on and try again.";
+        }
+        if (SystemsScan.take()) {
+            SystemsScan.message = "Can't reach the truck. Turn the key on and try again.";
+        }
+    }
+
+    /**
+     * Runs the systems scan when the Truck Systems screen asked for one.
+     * Returns true when it ran, since the adapter is reset afterwards and the
+     * truck has to be found again before polling.
+     */
+    private boolean handleSystemsScan() throws IOException {
+        if (!SystemsScan.take()) return false;
+        if (!useRealAdapter) {
+            SystemsScan.message = "Pair your OBD adapter on the Dashboard tab. The systems scan only reads the real truck.";
+            return false;
+        }
+        Double speed = LiveReadings.values.get(PidCatalog.SPEED);
+        if (speed != null && speed > 1) {
+            SystemsScan.message = "Park the truck first. Trip recording pauses while the scan runs.";
+            return false;
+        }
+
+        SystemsScan.busy = true;
+        AppLog.i(this, TAG, "Systems scan started");
+        try {
+            String phone = android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+                    + ", Android " + android.os.Build.VERSION.RELEASE;
+            TruckProbe.Result result = TruckProbe.run(realAdapter, phone,
+                    step -> SystemsScan.progress = step, () -> SystemsScan.cancel || stopped);
+            SystemsScan.lastReport = result.report;
+            try {
+                java.nio.file.Files.write(new java.io.File(getFilesDir(), SystemsScan.REPORT_FILE).toPath(),
+                        result.report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                AppLog.e(this, TAG, "Couldn't save the systems report", e);
+            }
+            AppLog.i(this, TAG, "Systems scan finished" + (result.linkLost ? " early: the adapter dropped" : ""));
+        } finally {
+            SystemsScan.busy = false;
+            SystemsScan.progress = null;
+            supportedPids = Collections.emptySet();
+            LiveReadings.clearValues();
+            LiveReadings.status = "Resetting the adapter after the systems scan…";
+        }
+        // ATZ puts the adapter back exactly as tracking expects it; if the link died
+        // mid-scan this throws and the normal reconnect takes over.
+        realAdapter.reinitialize();
+        return true;
+    }
+
+    /** Runs a scan or clear the Codes tab asked for, or the automatic scan after connecting. */
+    private void handleCodeRequest() throws IOException {
+        DiagnosticCodes.Request request = DiagnosticCodes.take();
+        if (request == DiagnosticCodes.Request.NONE && autoScanPending) request = DiagnosticCodes.Request.SCAN;
+        autoScanPending = false;
+        if (request == DiagnosticCodes.Request.NONE) return;
+        if (!useRealAdapter) {
+            // Codes only ever come from the truck; the simulator never invents them.
+            DiagnosticCodes.message = "Pair your OBD adapter on the Dashboard tab to read codes.";
+            return;
+        }
+
+        DiagnosticCodes.busy = true;
+        try {
+            if (request == DiagnosticCodes.Request.CLEAR) {
+                // Ford's procedure is key on, engine off; the PCM may ignore a clear while running.
+                if (LiveReadings.engineRunning) {
+                    DiagnosticCodes.message = "Shut the engine off and leave the key on, then clear the codes.";
+                    return;
+                }
+                boolean cleared = realAdapter.clearTroubleCodes();
+                AppLog.i(this, TAG, cleared ? "Trouble codes cleared" : "Clear codes: truck didn't confirm");
+                scanCodes();
+                DiagnosticCodes.message = cleared ? "Codes cleared."
+                        : "The truck didn't confirm the clear. Check that the key is on and the engine is off.";
+            } else {
+                scanCodes();
+            }
+        } catch (IOException e) {
+            DiagnosticCodes.message = "Lost the adapter while reading codes. It will try again when it reconnects.";
+            throw e;
+        } finally {
+            DiagnosticCodes.busy = false;
+        }
+    }
+
+    private void scanCodes() throws IOException {
+        List<String> stored = DTCReader.parseCodes(
+                realAdapter.requestTroubleCodes(DTCReader.Mode.STORED), DTCReader.Mode.STORED);
+        List<String> pending = DTCReader.parseCodes(
+                realAdapter.requestTroubleCodes(DTCReader.Mode.PENDING), DTCReader.Mode.PENDING);
+        DTCReader.MilStatus mil = supportedPids.contains(0x01)
+                ? DTCReader.parseMilStatus(realAdapter.readPid(0x01)) : null;
+        DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.of(System.currentTimeMillis(),
+                mil == null ? null : mil.milOn, stored, pending);
+        DiagnosticCodes.lastScan = scan;
+        DiagnosticCodes.message = null;
+        AppSettings.setLastCodeScan(this, scan);
+        AppLog.i(this, TAG, "Trouble codes: stored " + stored + ", pending " + pending
+                + ", check engine light " + (mil == null ? "unknown" : (mil.milOn ? "on" : "off")));
     }
 
     private void handleLinkLoss() {
@@ -287,7 +424,9 @@ public class TrackingService extends Service {
                 LiveReadings.values.put(id, value);
             }
         }
-        if (useRealAdapter && fordOilTemp) {
+        long nowMs = System.currentTimeMillis();
+        if (useRealAdapter && fordOilTemp && nowMs - lastFordOilReadMs >= FORD_OIL_TEMP_INTERVAL_MS) {
+            lastFordOilReadMs = nowMs;
             double oilC = realAdapter.readFordEngineOilTempC();
             if (Double.isNaN(oilC)) {
                 LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
@@ -393,8 +532,6 @@ public class TrackingService extends Service {
         db.tripPointDao().insert(point);
         distanceSincePoint = 0;
 
-        checkServiceThresholds();
-
         updateNotification(String.format(java.util.Locale.US,
                 "%.0f mph | %.1f MPG | Oil life %.0f%%",
                 speedMph, lastInstantMpg, profile.oilLifePercent));
@@ -413,37 +550,15 @@ public class TrackingService extends Service {
         db.sessionDao().update(activeSession);
         db.vehicleProfileDao().update(profile);
         activeSession = null;
+        checkServiceAlerts();
     }
 
-    private void checkServiceThresholds() {
-        List<ServiceStatus> dueSoon = MaintenanceScheduleEngine.dueSoonOrOverdue(profile, db.maintenanceDao());
-        Set<ServiceItemType> stillDue = EnumSet.noneOf(ServiceItemType.class);
-        for (ServiceStatus status : dueSoon) {
-            stillDue.add(status.type);
-            if (!notifiedDueSoon.contains(status.type)) {
-                notifiedDueSoon.add(status.type);
-                postServiceAlert(status);
-            }
-        }
-        notifiedDueSoon.retainAll(stillDue);
-    }
-
-    private void postServiceAlert(ServiceStatus status) {
-        String text = status.overdue
-                ? String.format(java.util.Locale.US, "%s is overdue (%.0f%% of service life used)", status.displayName, status.percentOfLifeUsed)
-                : String.format(java.util.Locale.US, "%s at %.0f%% of service life — %.0f mi remaining", status.displayName, status.percentOfLifeUsed, status.milesRemaining());
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ALERTS)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(status.overdue ? "Maintenance overdue" : "Maintenance due soon")
-                .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true);
-
-        android.app.NotificationManager manager =
-                (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.notify(2000 + status.type.ordinal(), builder.build());
+    /** Service alerts wait until the truck is parked — never a buzz mid-drive. */
+    private void checkServiceAlerts() {
+        try {
+            ServiceAlertPolicy.checkAndNotify(this, profile, db.maintenanceDao());
+        } catch (RuntimeException e) {
+            AppLog.e(this, TAG, "Service alert check failed", e);
         }
     }
 
@@ -483,11 +598,13 @@ public class TrackingService extends Service {
         try {
             ioExecutor.execute(() -> {
                 if (realAdapter != null) realAdapter.disconnect();
-                if (activeSession != null) {
+                boolean hadTrip = activeSession != null;
+                if (hadTrip) {
                     activeSession.endTimestamp = System.currentTimeMillis();
                     db.sessionDao().update(activeSession);
                 }
                 if (profile != null) db.vehicleProfileDao().update(profile);
+                if (hadTrip) checkServiceAlerts(); // key-off drops the adapter before the engine-off timer ends the trip
             });
         } catch (RejectedExecutionException ignored) {
         }

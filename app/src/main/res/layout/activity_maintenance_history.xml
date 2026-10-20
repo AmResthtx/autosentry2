@@ -2,12 +2,16 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:background="@color/dashboard_bg">
 
     <ListView
         android:id="@+id/listEvents"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@color/divider"
+        android:dividerHeight="1dp" />
 
     <TextView
         android:id="@+id/textEmpty"
@@ -15,7 +19,9 @@
         android:layout_height="wrap_content"
         android:padding="24dp"
         android:gravity="center"
-        android:text="No maintenance or upgrades logged yet"
+        android:text="@string/no_history"
+        android:textColor="@color/textSecondary"
+        android:textSize="16sp"
         android:visibility="gone" />
 
 </LinearLayout>

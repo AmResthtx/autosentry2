@@ -30,12 +30,29 @@ public class ELM327Adapter {
     // First real query makes the adapter search protocols / init the bus, which can take several seconds.
     private static final long BUS_INIT_TIMEOUT_MS = 15000L;
     private static final long PID_TIMEOUT_MS = 2500L;
+    // Trouble-code replies can run several frames, and a clear makes the PCM erase memory.
+    private static final long DTC_TIMEOUT_MS = 6000L;
 
     private BluetoothSocket socket = null;
     private InputStream inputStream = null;
     private OutputStream outputStream = null;
     private String adapterAddress = null;
     private boolean connected = false;
+
+    /** Receives every command and raw reply, for the debug log. */
+    public interface Trace {
+        void exchange(String command, String reply);
+    }
+
+    private volatile Trace trace = null;
+
+    // Learned per connection: the bus protocol, and how the PCM wants Ford enhanced (Mode 22) requests sent.
+    private boolean j1850Pwm = false;
+    private enum FordAddressing { UNKNOWN, FUNCTIONAL, PCM_DIRECT }
+    private FordAddressing fordAddressing = FordAddressing.UNKNOWN;
+    // J1850 PWM headers: Ford's physical address for the PCM, and the standard OBD-II functional header.
+    static final String PCM_HEADER = "C410F1";
+    static final String OBD_HEADER = "616AF1";
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
@@ -81,20 +98,37 @@ public class ELM327Adapter {
         connected = true;
 
         try {
-            // Reset, echo off, linefeeds off, spaces off, headers off, protocol AUTO.
-            // No CAN-specific settings: the 7.3L is J1850 PWM.
-            command("ATZ", RESET_TIMEOUT_MS);
-            Thread.sleep(100);
-            command("ATE0", AT_TIMEOUT_MS);
-            command("ATL0", AT_TIMEOUT_MS);
-            command("ATS0", AT_TIMEOUT_MS);
-            command("ATH0", AT_TIMEOUT_MS);
-            command("ATSP0", AT_TIMEOUT_MS);
+            reinitialize();
         } catch (IOException e) {
             disconnect();
             throw e;
         }
         return true;
+    }
+
+    /**
+     * Resets the adapter (ATZ) and applies AutoSentry's settings without
+     * dropping the Bluetooth link, e.g. after the systems scan changed headers.
+     * Closing the socket instead could make Android report the adapter
+     * disconnected, which ends tracking.
+     */
+    public synchronized void reinitialize() throws IOException {
+        j1850Pwm = false;
+        fordAddressing = FordAddressing.UNKNOWN;
+        // Reset, echo off, linefeeds off, spaces off, headers off, protocol AUTO.
+        // No CAN-specific settings: the 7.3L is J1850 PWM.
+        command("ATZ", RESET_TIMEOUT_MS);
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while resetting adapter");
+        }
+        command("ATE0", AT_TIMEOUT_MS);
+        command("ATL0", AT_TIMEOUT_MS);
+        command("ATS0", AT_TIMEOUT_MS);
+        command("ATH0", AT_TIMEOUT_MS);
+        command("ATSP0", AT_TIMEOUT_MS);
     }
 
     public synchronized void disconnect() {
@@ -150,7 +184,39 @@ public class ELM327Adapter {
             }
             if (!supported.contains(base + 0x20)) break; // no further bitmap page
         }
+        if (!supported.isEmpty()) j1850Pwm = isJ1850PwmProtocol(command("ATDPN", AT_TIMEOUT_MS));
         return supported;
+    }
+
+    /** True once the bus is up and the adapter settled on J1850 PWM (the 7.3L's bus). */
+    public synchronized boolean isJ1850Pwm() {
+        return j1850Pwm;
+    }
+
+    /** ATDPN answers the protocol number, prefixed with "A" when auto-detected; 1 is J1850 PWM. */
+    static boolean isJ1850PwmProtocol(String reply) {
+        if (reply == null) return false;
+        for (String rawLine : reply.split("[\\r\\n]+")) {
+            String line = rawLine.replace(">", "").trim().toUpperCase(Locale.US);
+            if (line.matches("A?[0-9A-C]")) return line.endsWith("1");
+        }
+        return false;
+    }
+
+    public void setTrace(Trace trace) {
+        this.trace = trace;
+    }
+
+    public Trace getTrace() {
+        return trace;
+    }
+
+    /**
+     * Any command, for the systems scan. A caller that changes adapter
+     * settings (headers, protocol) must reconnect afterwards so ATZ resets them.
+     */
+    public synchronized String rawCommand(String cmd, long timeoutMs) throws IOException {
+        return command(cmd, timeoutMs);
     }
 
     public synchronized int[] readPid(int pid) throws IOException {
@@ -169,8 +235,58 @@ public class ELM327Adapter {
      * Returns Celsius, or NaN when the truck had no answer.
      */
     public synchronized double readFordEngineOilTempC() throws IOException {
-        int[] data = parseReply(command("22194F", PID_TIMEOUT_MS), "62194F");
+        int[] data = readFordEnhanced("194F");
         return (data == null || data.length < 1) ? Double.NaN : data[0] - 40;
+    }
+
+    /**
+     * Data bytes of a Ford enhanced (Mode 22) reading like "194F", or null.
+     * Tries the standard OBD-II broadcast first; on J1850 PWM Ford modules
+     * often only answer a request addressed to them, so it then retries aimed
+     * straight at the PCM, and remembers which way worked for this connection.
+     */
+    public synchronized int[] readFordEnhanced(String pid) throws IOException {
+        String request = "22" + pid;
+        String header = "62" + pid;
+        if (fordAddressing != FordAddressing.PCM_DIRECT) {
+            int[] data = parseReply(command(request, PID_TIMEOUT_MS), header);
+            if (data != null) {
+                fordAddressing = FordAddressing.FUNCTIONAL;
+                return data;
+            }
+            if (fordAddressing == FordAddressing.FUNCTIONAL || !j1850Pwm) return null;
+        }
+        int[] data = parseReply(commandToPcm(request), header);
+        if (data != null) fordAddressing = FordAddressing.PCM_DIRECT;
+        return data;
+    }
+
+    /** True once a Ford enhanced reading has answered only when addressed straight to the PCM. */
+    public synchronized boolean usesPcmAddressing() {
+        return fordAddressing == FordAddressing.PCM_DIRECT;
+    }
+
+    /** One request aimed at the PCM (header C4 10 F1), then back to the standard OBD-II header. */
+    private String commandToPcm(String request) throws IOException {
+        command("ATSH" + PCM_HEADER, AT_TIMEOUT_MS);
+        try {
+            return command(request, PID_TIMEOUT_MS);
+        } finally {
+            command("ATSH" + OBD_HEADER, AT_TIMEOUT_MS);
+        }
+    }
+
+    /** Raw reply to a trouble-code request (03 stored, 07 pending), for DTCReader to parse. */
+    public synchronized String requestTroubleCodes(DTCReader.Mode mode) throws IOException {
+        return command(String.format(Locale.US, "%02X", mode.request), DTC_TIMEOUT_MS);
+    }
+
+    /**
+     * Mode 04: erases stored and pending codes and the freeze frame, and resets
+     * the readiness monitors. True when the truck acknowledged it.
+     */
+    public synchronized boolean clearTroubleCodes() throws IOException {
+        return DTCReader.isClearAcknowledged(command("04", DTC_TIMEOUT_MS));
     }
 
     static int[] parseMode01(String response, int pid) {
@@ -200,7 +316,10 @@ public class ELM327Adapter {
 
     private String command(String cmd, long timeoutMs) throws IOException {
         sendCommand(cmd);
-        return readResponse(timeoutMs);
+        String reply = readResponse(timeoutMs);
+        Trace t = trace;
+        if (t != null) t.exchange(cmd, reply);
+        return reply;
     }
 
     public synchronized void sendCommand(String cmd) throws IOException {

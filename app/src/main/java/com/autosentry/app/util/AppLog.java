@@ -74,7 +74,7 @@ public final class AppLog {
 
     public static String readAll(Context context) {
         File file = logFile(context);
-        if (!file.exists()) return "(no errors logged yet)";
+        if (!file.exists()) return "(nothing logged yet)";
         try (FileInputStream in = new FileInputStream(file)) {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             byte[] chunk = new byte[4096];

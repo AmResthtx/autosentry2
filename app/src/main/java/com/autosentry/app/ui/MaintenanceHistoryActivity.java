@@ -24,6 +24,7 @@ import com.autosentry.app.R;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.MaintenanceAttachment;
 import com.autosentry.app.data.MaintenanceEvent;
+import com.autosentry.app.maintenance.ServiceInterval;
 
 import java.io.File;
 import java.util.List;
@@ -119,21 +120,18 @@ public class MaintenanceHistoryActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * Upgrades/other work show their own title ("Steel front bumper");
+     * scheduled services show the service name plus any inspection result
+     * ("Brake pads & rotors — Replaced").
+     */
     private static String displayTitle(MaintenanceEvent event) {
-        if (event.title != null && !event.title.isEmpty()) return event.title;
-        return niceLabel(event.type);
-    }
-
-    private static String niceLabel(String enumName) {
-        if (enumName == null) return "Unknown";
-        String[] words = enumName.split("_");
-        StringBuilder sb = new StringBuilder();
-        for (String w : words) {
-            if (sb.length() > 0) sb.append(' ');
-            if (w.isEmpty()) continue;
-            sb.append(w.substring(0, 1)).append(w.substring(1).toLowerCase());
+        boolean hasTitle = event.title != null && !event.title.isEmpty();
+        if ("UPGRADE".equals(event.type) || "OTHER".equals(event.type)) {
+            return hasTitle ? event.title : ServiceInterval.labelFor(event.type);
         }
-        return sb.toString();
+        String label = ServiceInterval.labelFor(event.type);
+        return hasTitle ? label + " — " + event.title : label;
     }
 
     private Bitmap decodeSampled(File file, int reqWidth, int reqHeight) {

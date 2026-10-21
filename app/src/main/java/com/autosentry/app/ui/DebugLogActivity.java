@@ -3,7 +3,9 @@ package com.autosentry.app.ui;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -65,8 +67,11 @@ public class DebugLogActivity extends AppCompatActivity {
         loadLog();
     }
 
+    /** Newest entries are at the bottom, so open there. */
     private void loadLog() {
         textLogContent.setText(AppLog.readAll(this));
+        ScrollView scroll = findViewById(R.id.scrollLog);
+        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 
     private void saveLog() {

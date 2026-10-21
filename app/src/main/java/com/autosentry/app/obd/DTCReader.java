@@ -1,108 +1,188 @@
 package com.autosentry.app.obd;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Trouble codes from Mode 03 (stored), 07 (pending) and 0A (permanent)
- * replies, with descriptions for common 7.3L Power Stroke codes.
+ * Turns ELM327 replies to Mode 03 (stored) and Mode 07 (pending) trouble-code
+ * requests into codes like "P1211", and describes them from the 7.3L list.
  *
- * Replies arrive with spaces and headers off (see ELM327Adapter). On J1850
- * (the 7.3L) each "43" line carries three 2-byte codes padded with 0000; on
- * CAN the first byte after "43" is a code count and long replies come as
- * numbered "0:", "1:" segments.
+ * The adapter runs with spaces and headers off, so a reply is one run of hex
+ * per line. Two layouts exist:
+ *  - J1850 PWM (the 7.3L) and other pre-CAN buses: each line is "43" plus
+ *    exactly three 2-byte codes, padded with 0000; more codes mean more lines.
+ *  - CAN: "43", a count byte, then that many codes; long replies come as an
+ *    ISO-TP block ("00A", "0:...", "1:...").
+ * After the 43/47 header, pre-CAN payloads are always an even number of bytes
+ * and CAN payloads (count + 2 per code) always odd, which tells them apart
+ * without asking the adapter which protocol it's on.
  */
 public final class DTCReader {
-    // 7.3L Powerstroke common DTC descriptions (subset)
-    private static final Map<String, String> DTC_MAP = new HashMap<>();
-    static {
-        DTC_MAP.put("P0236", "MAP Sensor Circuit - Range/Performance (Boost low)");
-        DTC_MAP.put("P0470", "Exhaust Back Pressure (EBP) Sensor Malfunction");
-        DTC_MAP.put("P0541", "Intake Air Heater (IAH) Relay Circuit Low");
-        DTC_MAP.put("P0603", "PCM Internal Memory Error");
-        DTC_MAP.put("P1211", "Injection Control Pressure Above/Below Spec");
-        DTC_MAP.put("P1212", "Injection Control Pressure Low During Crank");
-        DTC_MAP.put("P1247", "Turbocharger Boost Pressure Low");
-        DTC_MAP.put("P1248", "Turbocharger Boost Pressure High / Overboost");
-        DTC_MAP.put("P1280", "Injection Control Pressure Circuit Low");
-        DTC_MAP.put("P1670", "FICM Communication / Power Error");
-        DTC_MAP.put("P0261", "Cylinder 1 Injector Circuit Low");
-        DTC_MAP.put("P0264", "Cylinder 2 Injector Circuit Low");
-        DTC_MAP.put("P0276", "Cylinder 6 Injector Circuit Low");
-        DTC_MAP.put("P0401", "EGR Flow Insufficient (common 7.3L)");
-        DTC_MAP.put("P0404", "EGR Position Sensor Range/Performance");
-        DTC_MAP.put("P0606", "Processor / Internal Circuit Failure");
-    }
 
     public enum Mode {
-        STORED_03("03"), PENDING_07("07"), PERMANENT_0A("0A");
+        STORED(0x03, 'S', "Stored",
+                "Confirmed fault. If the check engine light is on, this is why."),
+        PENDING(0x07, 'P', "Pending",
+                "Seen once but not confirmed. It turns the check engine light on if it happens again.");
 
-        public final String request;
+        public final int request;
+        final char key;
+        public final String label;
+        public final String explanation;
 
-        Mode(String request) {
+        Mode(int request, char key, String label, String explanation) {
             this.request = request;
+            this.key = key;
+            this.label = label;
+            this.explanation = explanation;
         }
 
-        String replyHeader() {
-            return String.format(Locale.US, "%02X", Integer.parseInt(request, 16) + 0x40);
+        static Mode fromKey(char key) {
+            for (Mode m : values()) if (m.key == key) return m;
+            return null;
         }
     }
+
+    public static final class DtcRecord {
+        public final String code;
+        public final String title;
+        public final DtcSeverity severity;
+        public final String hint; // may be null
+        public final Mode mode;
+
+        DtcRecord(String code, String title, DtcSeverity severity, String hint, Mode mode) {
+            this.code = code;
+            this.title = title;
+            this.severity = severity;
+            this.hint = hint;
+            this.mode = mode;
+        }
+    }
+
+    /** Check engine light state from Mode 01 PID 01. */
+    public static final class MilStatus {
+        public final boolean milOn;
+        /** How many codes the truck says are stored. */
+        public final int storedCount;
+
+        MilStatus(boolean milOn, int storedCount) {
+            this.milOn = milOn;
+            this.storedCount = storedCount;
+        }
+    }
+
+    private static final Pattern ISO_TP_FRAME = Pattern.compile("^([0-9A-F]):([0-9A-F]*)$");
+    private static final Pattern ISO_TP_LENGTH = Pattern.compile("^[0-9A-F]{3}$");
+    private static final Pattern HEX = Pattern.compile("^[0-9A-F]+$");
 
     private DTCReader() {}
 
-    /** Codes in the reply, without duplicates (several modules can answer). Empty when none. */
-    public static List<String> parse(String response, Mode mode, boolean canFormat) {
+    /** Codes in the order the truck sent them, duplicates removed. Empty for NO DATA or no codes. */
+    public static List<String> parseCodes(String response, Mode mode) {
         Set<String> codes = new LinkedHashSet<>();
         if (response == null) return new ArrayList<>(codes);
-        String header = mode.replyHeader();
-        StringBuilder segments = new StringBuilder();
-        for (String rawLine : response.split("[\\r\\n]+")) {
-            String line = rawLine.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
-            if (line.matches("[0-9A-F]:[0-9A-F]*")) {
-                segments.append(line.substring(2)); // CAN multi-frame piece
-            } else if (line.startsWith(header) && line.matches("[0-9A-F]+")) {
-                addCodes(line.substring(header.length()), canFormat, codes);
+        String header = String.format(Locale.US, "%02X", mode.request + 0x40);
+
+        for (String message : splitMessages(response)) {
+            if (!message.startsWith(header) || message.length() % 2 != 0) continue;
+            String payload = message.substring(header.length());
+            int bytes = payload.length() / 2;
+            int start = 0;
+            int count = -1;
+            if (bytes % 2 == 1) { // CAN: count byte first
+                count = Integer.parseInt(payload.substring(0, 2), 16);
+                start = 2;
             }
-        }
-        if (segments.length() > 0 && segments.indexOf(header) == 0) {
-            addCodes(segments.substring(header.length()), canFormat, codes);
+            int found = 0;
+            for (int i = start; i + 4 <= payload.length(); i += 4) {
+                if (count >= 0 && found >= count) break;
+                int a = Integer.parseInt(payload.substring(i, i + 2), 16);
+                int b = Integer.parseInt(payload.substring(i + 2, i + 4), 16);
+                if (a == 0 && b == 0) continue; // padding
+                codes.add(decode(a, b));
+                found++;
+            }
         }
         return new ArrayList<>(codes);
     }
 
-    private static void addCodes(String hex, boolean canFormat, Set<String> out) {
-        int start = canFormat ? 2 : 0; // CAN: skip the code-count byte
-        for (int i = start; i + 4 <= hex.length(); i += 4) {
-            int b0 = Integer.parseInt(hex.substring(i, i + 2), 16);
-            int b1 = Integer.parseInt(hex.substring(i + 2, i + 4), 16);
-            if (b0 == 0 && b1 == 0) continue; // padding
-            out.add(decode(b0, b1));
+    /**
+     * Splits a raw reply into whole messages: one per plain data line, and one
+     * per ISO-TP block (frames joined, trimmed to the stated length). Status
+     * lines like SEARCHING..., BUS INIT: ...OK, NO DATA and "?" are dropped.
+     */
+    static List<String> splitMessages(String response) {
+        List<String> messages = new ArrayList<>();
+        StringBuilder block = null;
+        int blockBytes = -1;
+        for (String raw : response.split("[\\r\\n]+")) {
+            String line = raw.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
+            if (line.isEmpty()) continue;
+            if (ISO_TP_LENGTH.matcher(line).matches()) {
+                addBlock(messages, block, blockBytes);
+                block = new StringBuilder();
+                blockBytes = Integer.parseInt(line, 16);
+                continue;
+            }
+            Matcher frame = ISO_TP_FRAME.matcher(line);
+            if (frame.matches()) {
+                if (block == null) block = new StringBuilder();
+                block.append(frame.group(2));
+                continue;
+            }
+            if (!HEX.matcher(line).matches()) continue;
+            addBlock(messages, block, blockBytes);
+            block = null;
+            blockBytes = -1;
+            messages.add(line);
         }
+        addBlock(messages, block, blockBytes);
+        return messages;
     }
 
-    /** SAE J2012: top 2 bits pick P/C/B/U, next 2 the first digit, then three hex digits. */
-    static String decode(int b0, int b1) {
-        char letter = "PCBU".charAt((b0 >> 6) & 3);
-        return String.format(Locale.US, "%c%d%X%X%X", letter, (b0 >> 4) & 3, b0 & 0xF, (b1 >> 4) & 0xF, b1 & 0xF);
+    private static void addBlock(List<String> messages, StringBuilder block, int blockBytes) {
+        if (block == null || block.length() == 0) return;
+        String data = block.toString();
+        if (blockBytes > 0 && data.length() > blockBytes * 2) data = data.substring(0, blockBytes * 2);
+        messages.add(data);
     }
 
-    /** "P0470 (Exhaust Back Pressure (EBP) Sensor Malfunction)", or just the code when not in the table. */
+    /**
+     * SAE J2012: the top two bits pick P/C/B/U, the next two are the first
+     * digit, and the remaining three nibbles are hex digits.
+     */
+    public static String decode(int a, int b) {
+        char letter = "PCBU".charAt((a >> 6) & 0x3);
+        return String.format(Locale.US, "%c%d%X%X%X", letter, (a >> 4) & 0x3, a & 0xF, (b >> 4) & 0xF, b & 0xF);
+    }
+
+    /** True when the truck acknowledged a Mode 04 clear ("44"). */
+    public static boolean isClearAcknowledged(String response) {
+        return splitMessages(response == null ? "" : response).contains("44");
+    }
+
+    /** Reads the light and stored-code count from PID 01's first byte; null when the truck didn't answer. */
+    public static MilStatus parseMilStatus(int[] pid01Data) {
+        if (pid01Data == null || pid01Data.length < 1) return null;
+        return new MilStatus((pid01Data[0] & 0x80) != 0, pid01Data[0] & 0x7F);
+    }
+
+    public static DtcRecord describe(String code, Mode mode) {
+        DtcDictionary.Entry entry = DtcDictionary.lookup(code);
+        if (entry == null) {
+            return new DtcRecord(code, "Not in AutoSentry's 7.3L code list yet", DtcSeverity.UNKNOWN, null, mode);
+        }
+        return new DtcRecord(code, entry.title, entry.severity, entry.hint, mode);
+    }
+
+    /** "P0470 (Exhaust Back Pressure Sensor Circuit Malfunction)", or just the code when not in the 7.3L list. */
     public static String describe(String code) {
-        String text = DTC_MAP.get(code);
-        return text != null ? code + " (" + text + ")" : code;
-    }
-
-    public static String getCommonCodeDescriptions() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("7.3L Powerstroke Common DTCs:\n");
-        for (String code : DTC_MAP.keySet()) {
-            sb.append(code).append(" - ").append(DTC_MAP.get(code)).append("\n");
-        }
-        return sb.toString();
+        DtcDictionary.Entry entry = DtcDictionary.lookup(code);
+        return entry != null ? code + " (" + entry.title + ")" : code;
     }
 }

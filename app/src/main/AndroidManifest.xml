@@ -42,6 +42,7 @@
         </activity>
         <activity android:name=".ui.SetupWizardActivity" android:exported="false" />
         <activity android:name=".ui.DebugLogActivity" android:exported="false" />
+        <activity android:name=".ui.SystemsScanActivity" android:exported="false" />
         <activity android:name=".ui.LogMaintenanceActivity" android:exported="false" />
         <activity android:name=".ui.MaintenanceHistoryActivity" android:exported="false" />
 

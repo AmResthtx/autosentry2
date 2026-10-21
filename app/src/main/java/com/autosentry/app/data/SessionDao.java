@@ -27,4 +27,8 @@ public interface SessionDao {
 
     @Query("SELECT * FROM sessions WHERE endTimestamp = 0 ORDER BY startTimestamp DESC LIMIT 1")
     Session getActive();
+
+    /** Trip miles AutoSentry recorded since a moment in time (never-logged service items count these). */
+    @Query("SELECT COALESCE(SUM(distanceMiles), 0) FROM sessions WHERE startTimestamp >= :sinceMillis")
+    double milesSince(long sinceMillis);
 }

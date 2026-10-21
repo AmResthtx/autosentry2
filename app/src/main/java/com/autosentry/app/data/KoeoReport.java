@@ -22,20 +22,26 @@ public class KoeoReport {
     public long timestamp;
     public double keyOnVolts;    // OBD-port voltage before cranking; 0 = no answer
     public String readings;      // "Label: value" lines for every reading the truck answered
-    public String storedCodes;   // comma-separated; "" = none; null = no answer
+    public String storedCodes;   // comma-separated codes the truck sent; "" = none; null = no answer
     public String pendingCodes;
+    // Why that read failed or fell short ("couldn't read after 3 tries: the truck didn't answer");
+    // null when it answered. A failed read can still keep the codes that came through.
+    public String storedCodesProblem;
+    public String pendingCodesProblem;
     public int crankAttempts;
     public double crankSeconds;  // last attempt; 0 = not measured
     public double minCrankVolts; // lowest voltage seen while cranking; 0 = not measured
     public boolean started;
+
+    private static final String COULDNT_READ = "couldn't read";
 
     public String summary() {
         StringBuilder sb = new StringBuilder();
         sb.append(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(timestamp)))
                 .append('\n');
         sb.append("Battery at key-on: ").append(keyOnVolts > 0 ? volts(keyOnVolts) : "no answer").append('\n');
-        sb.append("Stored codes: ").append(codes(storedCodes)).append('\n');
-        sb.append("Pending codes: ").append(codes(pendingCodes)).append('\n');
+        sb.append("Stored codes: ").append(codes(storedCodes, storedCodesProblem)).append('\n');
+        sb.append("Pending codes: ").append(codes(pendingCodes, pendingCodesProblem)).append('\n');
         if (readings != null && !readings.isEmpty()) sb.append(readings).append('\n');
         sb.append("Crank: ");
         if (started) {
@@ -57,12 +63,39 @@ public class KoeoReport {
         return String.format(Locale.US, "%.1f V", v);
     }
 
-    private static String codes(String list) {
-        if (list == null) return "no answer";
-        if (list.isEmpty()) return "none";
+    /** Records one mode of a code read: the codes that came through, and why it fell short if it did. */
+    public void setCodes(DTCReader.Result result) {
+        StringBuilder joined = new StringBuilder();
+        for (String code : result.codes) {
+            if (joined.length() > 0) joined.append(',');
+            joined.append(code);
+        }
+        String codes = joined.toString();
+        String problem = result.describeProblem();
+        if (result.mode == DTCReader.Mode.STORED) {
+            storedCodes = problem != null && codes.isEmpty() ? null : codes;
+            storedCodesProblem = problem;
+        } else {
+            pendingCodes = problem != null && codes.isEmpty() ? null : codes;
+            pendingCodesProblem = problem;
+        }
+    }
+
+    static String codes(String list, String problem) {
         StringBuilder sb = new StringBuilder();
-        for (String code : list.split(",")) {
-            sb.append("\n    ").append(DTCReader.describe(code.trim()));
+        if (problem != null) {
+            // Shouted like "did NOT start": a failed read must never be skimmed as "none".
+            sb.append(problem.startsWith(COULDNT_READ)
+                    ? COULDNT_READ.toUpperCase(Locale.US) + problem.substring(COULDNT_READ.length()) : problem);
+        } else if (list == null) {
+            return "no answer";
+        } else if (list.isEmpty()) {
+            return "none";
+        }
+        if (list != null && !list.isEmpty()) {
+            for (String code : list.split(",")) {
+                sb.append("\n    ").append(DTCReader.describe(code.trim()));
+            }
         }
         return sb.toString();
     }

@@ -39,8 +39,9 @@ public final class MaintenanceScheduleEngine {
                 : Math.max(0, milesTrackedSinceStart);
         double monthsSince = Math.max(0, (System.currentTimeMillis() - baselineTime) / MS_PER_MONTH);
 
-        return new ServiceStatus(interval, milesSince, interval.miles(profile.severeDuty),
-                monthsSince, interval.months(profile.severeDuty), lastEvent != null);
+        boolean serviced = lastEvent != null;
+        return new ServiceStatus(interval, milesSince, interval.miles(profile.severeDuty, serviced),
+                monthsSince, interval.months(profile.severeDuty, serviced), serviced);
     }
 
     public static List<ServiceStatus> computeAll(VehicleProfile profile, MaintenanceDao dao,

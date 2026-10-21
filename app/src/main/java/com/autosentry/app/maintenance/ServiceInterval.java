@@ -77,6 +77,10 @@ public final class ServiceInterval {
     public final Action action;
     public final AlertLevel alertLevel;
     public int normalMiles, normalMonths, severeMiles, severeMonths;
+    // Some items repeat on a different interval once one service is on record (Ford's coolant: the
+    // first flush at 50,000 mi / 4 years, then every 30,000 mi / 3 years).
+    private boolean repeats = false;
+    private int repeatMiles, repeatMonths;
     public String source = COMMON;
     public String why = "";
     public String[] parts = new String[0];
@@ -95,6 +99,14 @@ public final class ServiceInterval {
 
     private ServiceInterval every(int miles, int months) {
         return normal(miles, months).severe(miles, months);
+    }
+
+    /** The interval after the first logged service, for items whose first interval is longer. */
+    private ServiceInterval thenEvery(int miles, int months) {
+        repeats = true;
+        repeatMiles = miles;
+        repeatMonths = months;
+        return this;
     }
 
     private ServiceInterval normal(int miles, int months) {
@@ -163,7 +175,7 @@ public final class ServiceInterval {
                 .addOns("Drain the fuel bowl water separator");
 
         item(ServiceItemType.COOLANT, "Coolant flush", Category.ENGINE, Action.SERVICE, AlertLevel.STANDARD)
-                .every(50000, 48).source(FORD)
+                .every(50000, 48).thenEvery(30000, 36).source(FORD)
                 .why("Ford: first flush at 50,000 mi / 4 years, then every 30,000 mi / 3 years. "
                         + "Old coolant stops protecting the cylinder liners and water pump.")
                 .parts("Diesel-rated coolant for the 7.3L (full-system amount)",
@@ -366,6 +378,15 @@ public final class ServiceInterval {
 
     public int months(boolean severeDuty) {
         return severeDuty ? severeMonths : normalMonths;
+    }
+
+    /** Miles until the next service: the repeat interval once this item has been logged, if it has one. */
+    public int miles(boolean severeDuty, boolean serviced) {
+        return serviced && repeats ? repeatMiles : miles(severeDuty);
+    }
+
+    public int months(boolean severeDuty, boolean serviced) {
+        return serviced && repeats ? repeatMonths : months(severeDuty);
     }
 
     /** Human label for any stored MaintenanceEvent.type, including UPGRADE/OTHER. */

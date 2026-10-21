@@ -108,6 +108,10 @@ public class TrackingService extends Service {
     private static final double MAX_TICK_SECONDS = 5.0;
     // Renewed on every poll tick so it never outlives the service, but survives any one gap.
     private static final long WAKE_LOCK_TIMEOUT_MS = 60_000L;
+    // A full systems scan on a truck that doesn't answer is ~2,000 requests at up to 1.5 s each.
+    private static final long SCAN_WAKE_LOCK_TIMEOUT_MS = 90 * 60_000L;
+    // GPS movement this recent means the truck is driving, whatever the last OBD speed said.
+    private static final long SCAN_GPS_MOVING_MS = 10_000L;
     // A missed first answer (bus still waking up) must not hide oil temp for the whole drive.
     private static final long OIL_PROBE_RETRY_MS = 30_000L;
     // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
@@ -800,14 +804,25 @@ public class TrackingService extends Service {
      */
     private boolean handleSystemsScan() throws IOException {
         if (!SystemsScan.take()) return false;
-        Double speed = LiveReadings.values.get(PidCatalog.SPEED);
-        if (speed != null && speed > 1) {
+        // Ask the truck now: right after a reconnect the live readings are empty, and a scan
+        // started while driving would leave a hole in the trip.
+        double speed = supportedPids.contains(PidCatalog.SPEED)
+                ? PidCatalog.get(PidCatalog.SPEED).decode(realAdapter.readPid(PidCatalog.SPEED)) : Double.NaN;
+        boolean gpsMoving = System.currentTimeMillis() - lastGpsMovingTimestamp < SCAN_GPS_MOVING_MS;
+        if (gpsMoving || speed > 1) {
             SystemsScan.message = "Park the truck first. Trip recording pauses while the scan runs.";
+            return false;
+        }
+        if (Double.isNaN(speed)) {
+            SystemsScan.message = "The truck didn't report its speed, so the scan can't confirm it's parked. "
+                    + "Park, leave the key on, and try again.";
             return false;
         }
 
         SystemsScan.busy = true;
         AppLog.i(this, TAG, "Systems scan started");
+        // The scan holds the poll thread, so pollTick can't renew the lock while it runs.
+        if (wakeLock != null) wakeLock.acquire(SCAN_WAKE_LOCK_TIMEOUT_MS);
         try {
             String phone = android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
                     + ", Android " + android.os.Build.VERSION.RELEASE;
@@ -822,6 +837,7 @@ public class TrackingService extends Service {
             }
             AppLog.i(this, TAG, "Systems scan finished" + (result.linkLost ? " early: the adapter dropped" : ""));
         } finally {
+            if (wakeLock != null) wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS); // back to the normal per-tick hold
             SystemsScan.busy = false;
             SystemsScan.progress = null;
             supportedPids = Collections.emptySet();

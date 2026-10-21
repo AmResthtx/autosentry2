@@ -54,7 +54,7 @@ public class SystemsScanActivity extends AppCompatActivity {
                 return;
             }
             if (!AppSettings.hasObdAdapterConfigured(this)) {
-                Toast.makeText(this, "Pair your OBD adapter on the Dashboard tab first", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Pair your OBD adapter on the Account tab first", Toast.LENGTH_LONG).show();
                 return;
             }
             SystemsScan.request();

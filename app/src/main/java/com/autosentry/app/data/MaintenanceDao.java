@@ -18,6 +18,7 @@ public interface MaintenanceDao {
     @Query("SELECT * FROM maintenance_events ORDER BY timestamp DESC")
     List<MaintenanceEvent> getAllSync();
 
-    @Query("SELECT * FROM maintenance_events WHERE type = :type ORDER BY timestamp DESC LIMIT 1")
+    // Highest odometer wins, so back-logging an older service never resets the schedule.
+    @Query("SELECT * FROM maintenance_events WHERE type = :type ORDER BY odometerAtEvent DESC, timestamp DESC LIMIT 1")
     MaintenanceEvent getMostRecentOfType(String type);
 }

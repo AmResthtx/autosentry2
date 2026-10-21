@@ -3,6 +3,7 @@ package com.autosentry.app;
 import android.app.Application;
 
 import com.autosentry.app.notifications.NotificationUtils;
+import com.autosentry.app.service.TrackingWatchdogWorker;
 import com.autosentry.app.util.AppLog;
 
 public class App extends Application {
@@ -11,6 +12,7 @@ public class App extends Application {
         super.onCreate();
         NotificationUtils.ensureChannels(this);
         installCrashLogger();
+        TrackingWatchdogWorker.schedule(this);
     }
 
     /**

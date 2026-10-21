@@ -2,7 +2,7 @@ package com.autosentry.app.obd;
 
 /**
  * How urgently a trouble code needs attention. This is AutoSentry's guidance
- * from the 7.3L code list, not a diagnosis, and the Codes tab says so.
+ * from the 7.3L code list, not a diagnosis, and the Checks tab says so.
  * Declared most urgent first, so sorting by ordinal puts the worst on top.
  */
 public enum DtcSeverity {

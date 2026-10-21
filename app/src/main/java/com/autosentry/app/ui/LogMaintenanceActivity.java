@@ -41,6 +41,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -49,7 +50,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Records one service, opened by tapping its line on the Service tab.
+ * Records one service, opened by tapping its line on the History tab.
  *
  * For a scheduled item it first explains the job — status, why it matters,
  * parts to buy, one-time-use parts that must be new, and the "while you're in
@@ -77,8 +78,7 @@ public class LogMaintenanceActivity extends AppCompatActivity {
     private ServiceItemType serviceType; // null = upgrade / other work
     private ServiceInterval interval;
     private Spinner spinnerType;
-    private EditText editTitle, editNotes, editMilesAgo, editMonthsAgo;
-    private TextView textOdometer;
+    private EditText editTitle, editNotes, editOdometer, editMonthsAgo;
     private RadioGroup radioResult;
     private LinearLayout layoutPhotoThumbnails;
     private double currentOdometer = 0;
@@ -92,9 +92,21 @@ public class LogMaintenanceActivity extends AppCompatActivity {
     private static final String[] OTHER_LABELS = {"Upgrade / Modification", "Other work / repair"};
 
     @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        NavHelper.addMainMenuItem(this, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        return NavHelper.handle(this, item) || super.onOptionsItemSelected(item);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_log_maintenance);
+        NavHelper.enableBack(this);
         db = AppDatabase.getInstance(this);
 
         String typeExtra = getIntent().getStringExtra(EXTRA_SERVICE_TYPE);
@@ -108,9 +120,8 @@ public class LogMaintenanceActivity extends AppCompatActivity {
         spinnerType = findViewById(R.id.spinnerType);
         editTitle = findViewById(R.id.editTitle);
         editNotes = findViewById(R.id.editNotes);
-        editMilesAgo = findViewById(R.id.editMilesAgo);
+        editOdometer = findViewById(R.id.editOdometer);
         editMonthsAgo = findViewById(R.id.editMonthsAgo);
-        textOdometer = findViewById(R.id.textOdometer);
         radioResult = findViewById(R.id.radioResult);
         layoutPhotoThumbnails = findViewById(R.id.layoutPhotoThumbnails);
         Button buttonTakePhoto = findViewById(R.id.buttonTakePhoto);
@@ -184,18 +195,23 @@ public class LogMaintenanceActivity extends AppCompatActivity {
             MaintenanceEvent last = null;
             List<ServiceStatus> related = new ArrayList<>();
             if (interval != null && profile != null) {
-                status = MaintenanceScheduleEngine.computeStatus(serviceType, profile, db.maintenanceDao(), trackingStart);
+                double trackedMiles = db.sessionDao().milesSince(trackingStart);
+                status = MaintenanceScheduleEngine.computeStatus(serviceType, profile, db.maintenanceDao(),
+                        trackingStart, trackedMiles);
                 last = db.maintenanceDao().getMostRecentOfType(serviceType.name());
                 for (ServiceItemType type : interval.whileInThere) {
                     if (hidden.contains(type.name())) continue;
-                    related.add(MaintenanceScheduleEngine.computeStatus(type, profile, db.maintenanceDao(), trackingStart));
+                    related.add(MaintenanceScheduleEngine.computeStatus(type, profile, db.maintenanceDao(),
+                            trackingStart, trackedMiles));
                 }
             }
 
             final ServiceStatus s = status;
             final MaintenanceEvent lastEvent = last;
             runOnUiThread(() -> {
-                textOdometer.setText(String.format(Locale.US, "Odometer: %,.1f mi", currentOdometer));
+                if (editOdometer.getText().length() == 0) {
+                    editOdometer.setText(String.format(Locale.US, "%.1f", currentOdometer));
+                }
                 if (s != null) bindStatus(s, lastEvent);
                 for (ServiceStatus rs : related) addRelatedCheck(rs);
             });
@@ -325,16 +341,26 @@ public class LogMaintenanceActivity extends AppCompatActivity {
         }
         String notes = editNotes.getText().toString().trim();
 
-        // Back-filling a job done before the app was tracking: shift its odometer/date back.
-        int milesAgo = serviceType != null ? parseCount(editMilesAgo) : 0;
+        // Back-filling a job done before today: the odometer field carries the miles, this the date.
         int monthsAgo = serviceType != null ? parseCount(editMonthsAgo) : 0;
         long when = System.currentTimeMillis() - monthsAgo * MS_PER_MONTH;
-        double odometerAt = currentOdometer - milesAgo;
 
         List<ServiceItemType> alsoDone = new ArrayList<>();
         for (Map.Entry<ServiceItemType, CheckBox> entry : relatedChecks.entrySet()) {
             if (entry.getValue().isChecked()) alsoDone.add(entry.getKey());
         }
+
+        double odometer;
+        try {
+            odometer = Double.parseDouble(editOdometer.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            odometer = -1;
+        }
+        if (!(odometer >= 0) || Double.isInfinite(odometer)) {
+            editOdometer.setError("Enter the odometer reading in miles");
+            return;
+        }
+        final double eventOdometer = odometer;
 
         List<File> photosToSave = new ArrayList<>(pendingPhotos);
         ioExecutor.execute(() -> {
@@ -343,8 +369,14 @@ public class LogMaintenanceActivity extends AppCompatActivity {
             event.title = title == null || title.isEmpty() ? null : title;
             event.notes = notes.isEmpty() ? null : notes;
             event.timestamp = when;
-            event.odometerAtEvent = odometerAt;
+            event.odometerAtEvent = eventOdometer;
             long eventId = db.maintenanceDao().insert(event);
+
+            VehicleProfile profile = db.vehicleProfileDao().getSync();
+            if (profile != null && eventOdometer > profile.odometerMiles) {
+                db.vehicleProfileDao().setOdometer(eventOdometer); // the service can't be ahead of the truck
+                profile.odometerMiles = eventOdometer;
+            }
 
             for (File photo : photosToSave) {
                 MaintenanceAttachment attachment = new MaintenanceAttachment();
@@ -355,17 +387,24 @@ public class LogMaintenanceActivity extends AppCompatActivity {
                 db.maintenanceAttachmentDao().insert(attachment);
             }
 
+            Set<Long> savedIds = new HashSet<>();
+            savedIds.add(eventId);
             for (ServiceItemType related : alsoDone) {
                 MaintenanceEvent together = new MaintenanceEvent();
                 together.type = related.name();
                 together.notes = "Done together with " + interval.displayName;
                 together.timestamp = when;
-                together.odometerAtEvent = odometerAt;
-                db.maintenanceDao().insert(together);
+                together.odometerAtEvent = eventOdometer;
+                savedIds.add(db.maintenanceDao().insert(together));
             }
 
-            boolean oilChanged = serviceType == ServiceItemType.OIL_FILTER || alsoDone.contains(ServiceItemType.OIL_FILTER);
-            if (oilChanged) resetOilLife(milesAgo);
+            // Oil life follows the newest oil change; back-logging an older one leaves it alone.
+            MaintenanceEvent latestOil = db.maintenanceDao().getMostRecentOfType(ServiceItemType.OIL_FILTER.name());
+            if (profile != null && latestOil != null && savedIds.contains(latestOil.id)) {
+                double milesSince = Math.max(0, profile.odometerMiles - eventOdometer);
+                db.vehicleProfileDao().resetOil(
+                        OilLifeEngine.degrade(100.0, milesSince, profile.severeDuty, 0, 0), milesSince, when);
+            }
 
             int count = 1 + alsoDone.size();
             runOnUiThread(() -> {
@@ -375,17 +414,5 @@ public class LogMaintenanceActivity extends AppCompatActivity {
                 finish();
             });
         });
-    }
-
-    /** Oil life lives on the vehicle profile; a logged oil change restarts it. */
-    private void resetOilLife(int milesAgo) {
-        VehicleProfile profile = db.vehicleProfileDao().getSync();
-        if (profile == null) return;
-        // A back-filled change already has miles on it; charge them at the baseline rate.
-        profile.oilLifePercent = OilLifeEngine.degrade(100.0, milesAgo, profile.severeDuty, 0, 0);
-        profile.milesSinceOilChange = milesAgo;
-        profile.engineHoursSinceOilChange = 0;
-        profile.lastOilResetTimestamp = System.currentTimeMillis();
-        db.vehicleProfileDao().update(profile);
     }
 }

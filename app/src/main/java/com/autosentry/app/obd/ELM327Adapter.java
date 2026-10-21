@@ -33,11 +33,24 @@ public class ELM327Adapter {
     // Trouble-code replies can run several frames, and a clear makes the PCM erase memory.
     private static final long DTC_TIMEOUT_MS = 6000L;
 
+    // Ford enhanced (Mode 22) PIDs on J1850 PWM answer only when addressed to the PCM (0x10)
+    // from the tester (F1); Mode 01 needs the functional OBD header back afterwards.
+    // J1850 PWM headers: Ford's physical address for the PCM, and the standard OBD-II functional header.
+    static final String PCM_HEADER = "C410F1";
+    static final String OBD_HEADER = "616AF1";
+    private static final String FORD_PCM_HEADER = "ATSH" + PCM_HEADER;
+    private static final String OBD_PWM_HEADER = "ATSH" + OBD_HEADER;
+
     private BluetoothSocket socket = null;
+    private String lastEnhancedReply = "";
     private InputStream inputStream = null;
     private OutputStream outputStream = null;
     private String adapterAddress = null;
     private boolean connected = false;
+    // Which RFCOMM channel last connected; null until one has.
+    private Boolean useInsecure = null;
+    // Learned per connection once the bus is up.
+    private boolean j1850Pwm = false;
 
     /** Receives every command and raw reply, for the debug log. */
     public interface Trace {
@@ -45,14 +58,6 @@ public class ELM327Adapter {
     }
 
     private volatile Trace trace = null;
-
-    // Learned per connection: the bus protocol, and how the PCM wants Ford enhanced (Mode 22) requests sent.
-    private boolean j1850Pwm = false;
-    private enum FordAddressing { UNKNOWN, FUNCTIONAL, PCM_DIRECT }
-    private FordAddressing fordAddressing = FordAddressing.UNKNOWN;
-    // J1850 PWM headers: Ford's physical address for the PCM, and the standard OBD-II functional header.
-    static final String PCM_HEADER = "C410F1";
-    static final String OBD_HEADER = "616AF1";
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
@@ -78,18 +83,18 @@ public class ELM327Adapter {
         }
 
         BluetoothDevice device = bluetoothAdapter.getRemoteDevice(adapterAddress);
-        try {
-            socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            socket.connect();
-        } catch (IOException | SecurityException first) {
-            // Many ELM327 clones only accept the insecure channel.
-            closeQuietly();
+        if (useInsecure != null) {
+            // Asleep adapters take ~5 s to time out per attempt; once one channel has
+            // worked, don't double every retry by also trying the other.
+            openSocket(device, useInsecure);
+        } else {
             try {
-                socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
-                socket.connect();
-            } catch (SecurityException se) {
-                closeQuietly();
-                throw new IOException("Bluetooth permission denied", se);
+                openSocket(device, false);
+                useInsecure = false;
+            } catch (IOException first) {
+                // Many ELM327 clones only accept the insecure channel.
+                openSocket(device, true);
+                useInsecure = true;
             }
         }
 
@@ -114,7 +119,6 @@ public class ELM327Adapter {
      */
     public synchronized void reinitialize() throws IOException {
         j1850Pwm = false;
-        fordAddressing = FordAddressing.UNKNOWN;
         // Reset, echo off, linefeeds off, spaces off, headers off, protocol AUTO.
         // No CAN-specific settings: the 7.3L is J1850 PWM.
         command("ATZ", RESET_TIMEOUT_MS);
@@ -129,6 +133,21 @@ public class ELM327Adapter {
         command("ATS0", AT_TIMEOUT_MS);
         command("ATH0", AT_TIMEOUT_MS);
         command("ATSP0", AT_TIMEOUT_MS);
+    }
+
+    private void openSocket(BluetoothDevice device, boolean insecure) throws IOException {
+        try {
+            socket = insecure
+                    ? device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                    : device.createRfcommSocketToServiceRecord(SPP_UUID);
+            socket.connect();
+        } catch (IOException e) {
+            closeQuietly();
+            throw e;
+        } catch (SecurityException se) {
+            closeQuietly();
+            throw new IOException("Bluetooth permission denied", se);
+        }
     }
 
     public synchronized void disconnect() {
@@ -166,6 +185,39 @@ public class ELM327Adapter {
         } catch (IOException e) {
             return "unknown";
         }
+    }
+
+    /** Adapter's own ID string (e.g. "ELM327 v1.5" or "STN1155 v4.x"). Works with the key off. */
+    public synchronized String identify() throws IOException {
+        return clean(command("ATI", AT_TIMEOUT_MS));
+    }
+
+    /** Voltage at the OBD port as the adapter measures it (e.g. "12.6V"). Works with the key off. */
+    public synchronized String readVoltage() throws IOException {
+        return clean(command("ATRV", AT_TIMEOUT_MS));
+    }
+
+    /** OBD-port voltage in volts from ATRV, or 0 when the adapter's answer isn't a number. */
+    public synchronized double readVolts() throws IOException {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+(\\.\\d+)?)").matcher(readVoltage());
+        return m.find() ? Double.parseDouble(m.group(1)) : 0;
+    }
+
+    /** Raw reply to a trouble-code request (03 stored, 07 pending), for DTCReader to parse. */
+    public synchronized String requestTroubleCodes(DTCReader.Mode mode) throws IOException {
+        return command(String.format(Locale.US, "%02X", mode.request), DTC_TIMEOUT_MS);
+    }
+
+    /**
+     * Mode 04: erases stored and pending codes and the freeze frame, and resets
+     * the readiness monitors. True when the truck acknowledged it.
+     */
+    public synchronized boolean clearTroubleCodes() throws IOException {
+        return DTCReader.isClearAcknowledged(command("04", DTC_TIMEOUT_MS));
+    }
+
+    private static String clean(String reply) {
+        return reply.replace(">", "").replaceAll("\\s+", " ").trim();
     }
 
     /**
@@ -230,63 +282,68 @@ public class ELM327Adapter {
     }
 
     /**
-     * Ford enhanced engine oil temperature (Mode 22, PID 194F) for the 2000 7.3L
-     * Power Stroke, which doesn't answer the standard Mode 01 oil-temp PID.
-     * Returns Celsius, or NaN when the truck had no answer.
+     * Ford enhanced engine oil temperature (Mode 22, PID 1310, scaled (A*256+B)/100 - 40 °C)
+     * for the 7.3L Power Stroke on J1850 PWM, which doesn't answer the standard Mode 01
+     * oil-temp PID. Returns Celsius, or NaN when the truck had no usable answer.
      */
     public synchronized double readFordEngineOilTempC() throws IOException {
-        int[] data = readFordEnhanced("194F");
-        return (data == null || data.length < 1) ? Double.NaN : data[0] - 40;
+        return decodeFordOilTempC(readFord("1310")[0]);
     }
 
     /**
-     * Data bytes of a Ford enhanced (Mode 22) reading like "194F", or null.
-     * Tries the standard OBD-II broadcast first; on J1850 PWM Ford modules
-     * often only answer a request addressed to them, so it then retries aimed
-     * straight at the PCM, and remembers which way worked for this connection.
+     * Injection control pressure (psi) and IPR duty (%) for the crank check, from Ford's
+     * enhanced PIDs 1446 and 1434, scaled per ScanGauge's published 7.3L X-Gauge codes.
+     * NaN where the truck had no usable answer.
      */
-    public synchronized int[] readFordEnhanced(String pid) throws IOException {
-        String request = "22" + pid;
-        String header = "62" + pid;
-        if (fordAddressing != FordAddressing.PCM_DIRECT) {
-            int[] data = parseReply(command(request, PID_TIMEOUT_MS), header);
-            if (data != null) {
-                fordAddressing = FordAddressing.FUNCTIONAL;
-                return data;
+    public synchronized double[] readFordIcpIpr() throws IOException {
+        int[][] data = readFord("1446", "1434");
+        return new double[]{decodeFordIcpPsi(data[0]), decodeFordIprPercent(data[1])};
+    }
+
+    /** Raw data bytes for each Mode 22 code (four hex digits, e.g. "1440"); null where the PCM didn't answer. */
+    public synchronized int[][] readFordRaw(String... codes) throws IOException {
+        return readFord(codes);
+    }
+
+    /** Asks the PCM directly for each Mode 22 PID under one header switch; null where it had no answer. */
+    private int[][] readFord(String... pids) throws IOException {
+        int[][] data = new int[pids.length][];
+        StringBuilder replies = new StringBuilder();
+        command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        try {
+            for (int i = 0; i < pids.length; i++) {
+                String reply = command("22" + pids[i], PID_TIMEOUT_MS);
+                if (replies.length() > 0) replies.append(" | ");
+                replies.append(reply.replace(">", "").replaceAll("\\s+", " ").trim());
+                data[i] = parseReply(reply, "62" + pids[i]);
             }
-            if (fordAddressing == FordAddressing.FUNCTIONAL || !j1850Pwm) return null;
+        } finally {
+            command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
         }
-        int[] data = parseReply(commandToPcm(request), header);
-        if (data != null) fordAddressing = FordAddressing.PCM_DIRECT;
+        lastEnhancedReply = replies.toString();
         return data;
     }
 
-    /** True once a Ford enhanced reading has answered only when addressed straight to the PCM. */
-    public synchronized boolean usesPcmAddressing() {
-        return fordAddressing == FordAddressing.PCM_DIRECT;
+
+    /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
+    public synchronized String lastEnhancedReply() {
+        return lastEnhancedReply;
     }
 
-    /** One request aimed at the PCM (header C4 10 F1), then back to the standard OBD-II header. */
-    private String commandToPcm(String request) throws IOException {
-        command("ATSH" + PCM_HEADER, AT_TIMEOUT_MS);
-        try {
-            return command(request, PID_TIMEOUT_MS);
-        } finally {
-            command("ATSH" + OBD_HEADER, AT_TIMEOUT_MS);
-        }
+    static double decodeFordOilTempC(int[] data) {
+        if (data == null || data.length < 2) return Double.NaN;
+        double celsius = (data[0] * 256 + data[1]) / 100.0 - 40;
+        return celsius > 200 ? Double.NaN : celsius; // beyond any real oil temp: open/shorted sensor
     }
 
-    /** Raw reply to a trouble-code request (03 stored, 07 pending), for DTCReader to parse. */
-    public synchronized String requestTroubleCodes(DTCReader.Mode mode) throws IOException {
-        return command(String.format(Locale.US, "%02X", mode.request), DTC_TIMEOUT_MS);
+    static double decodeFordIcpPsi(int[] data) {
+        if (data == null || data.length < 2) return Double.NaN;
+        return (data[0] * 256 + data[1]) * 0.56;
     }
 
-    /**
-     * Mode 04: erases stored and pending codes and the freeze frame, and resets
-     * the readiness monitors. True when the truck acknowledged it.
-     */
-    public synchronized boolean clearTroubleCodes() throws IOException {
-        return DTCReader.isClearAcknowledged(command("04", DTC_TIMEOUT_MS));
+    static double decodeFordIprPercent(int[] data) {
+        if (data == null || data.length < 1) return Double.NaN;
+        return data[0] * 100.0 / 255.0;
     }
 
     static int[] parseMode01(String response, int pid) {

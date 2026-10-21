@@ -1,4 +1,0 @@
-name: Android CI (disabled)
-
-on:
-  workflow_dispatch:

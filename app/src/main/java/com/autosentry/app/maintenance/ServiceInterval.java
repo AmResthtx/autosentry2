@@ -63,7 +63,7 @@ public final class ServiceInterval {
      * proactive without nagging:
      *  SAFETY   — notify at 80% (engine- or safety-critical)
      *  STANDARD — notify only once overdue
-     *  QUIET    — never notify; shown in the Service tab only
+     *  QUIET    — never notify; shown on the History tab only
      */
     public enum AlertLevel { SAFETY, STANDARD, QUIET }
 

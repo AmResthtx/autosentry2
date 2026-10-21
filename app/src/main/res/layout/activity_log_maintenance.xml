@@ -212,22 +212,10 @@
                 android:layout_marginTop="4dp">
 
                 <EditText
-                    android:id="@+id/editMilesAgo"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="@string/miles_ago"
-                    android:inputType="number"
-                    android:textColor="@color/reading_text"
-                    android:textColorHint="@color/textDisabled"
-                    android:backgroundTint="@color/card_border" />
-
-                <EditText
                     android:id="@+id/editMonthsAgo"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="8dp"
                     android:hint="@string/months_ago"
                     android:inputType="number"
                     android:textColor="@color/reading_text"
@@ -315,14 +303,26 @@
                 android:backgroundTint="@color/card_border" />
 
             <TextView
-                android:id="@+id/textOdometer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="Odometer: -- mi"
-                android:textColor="@color/textSecondary"
-                android:textSize="14sp"
-                android:fontFamily="monospace" />
+                android:text="@string/odometer_at_service"
+                android:textStyle="bold"
+                android:textColor="@color/label_text"
+                android:textSize="12sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1" />
+
+            <EditText
+                android:id="@+id/editOdometer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:inputType="numberDecimal"
+                android:fontFamily="monospace"
+                android:textColor="@color/reading_text"
+                android:textColorHint="@color/textDisabled"
+                android:backgroundTint="@color/card_border" />
         </LinearLayout>
 
         <!-- Photos Card -->

@@ -8,18 +8,40 @@ android {
     namespace = "com.autosentry.app"
     compileSdk = 35
 
+    val releaseStoreFile = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_FILE").orNull
+    val releaseStorePassword = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_PASSWORD").orNull
+
     defaultConfig {
         applicationId = "com.autosentry.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        // GitHub Actions run number: every CI APK has its own build number (shown in the
+        // title bar) and installs over the previous one. Local builds are build 1.
+        versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 1
         versionName = "0.1.0"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.create("stableRelease") {
+                if (releaseStoreFile != null &&
+                    releaseStorePassword != null &&
+                    releaseKeyAlias != null &&
+                    releaseKeyPassword != null
+                ) {
+                    storeFile = file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                } else {
+                    initWith(signingConfigs.getByName("debug"))
+                }
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -38,6 +60,7 @@ android {
     }
     buildFeatures {
         viewBinding = false
+        buildConfig = true
     }
 }
 
@@ -50,4 +73,5 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.7")
+    testImplementation("junit:junit:4.13.2")
 }

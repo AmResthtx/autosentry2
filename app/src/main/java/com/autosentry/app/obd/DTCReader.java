@@ -179,4 +179,10 @@ public final class DTCReader {
         }
         return new DtcRecord(code, entry.title, entry.severity, entry.hint, mode);
     }
+
+    /** "P0470 (Exhaust Back Pressure Sensor Circuit Malfunction)", or just the code when not in the 7.3L list. */
+    public static String describe(String code) {
+        DtcDictionary.Entry entry = DtcDictionary.lookup(code);
+        return entry != null ? code + " (" + entry.title + ")" : code;
+    }
 }

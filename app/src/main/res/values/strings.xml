@@ -43,7 +43,7 @@
     <string name="tab_codes">Codes</string>
     <string name="check_engine_light">Check Engine Light</string>
     <string name="trouble_codes">Trouble Codes</string>
-    <string name="codes_hint">Tap a code for what it means and what to check.</string>
+    <string name="codes_hint">Each code shows how urgent it is and what to check.</string>
     <string name="scan_codes">Scan for Codes</string>
     <string name="clear_codes">Clear Codes</string>
     <string name="truck_systems">Truck Systems</string>
@@ -64,7 +64,7 @@
     <string name="result_repaired">Repaired / adjusted</string>
     <string name="result_replaced">Replaced</string>
     <string name="done_before_today">Done before today? (optional)</string>
-    <string name="miles_ago">Miles ago</string>
+    <string name="odometer_at_service">Odometer at service (mi)</string>
     <string name="months_ago">Months ago</string>
     <string name="type">Type</string>
     <string name="title_hint">Title (e.g. "Steel front bumper")</string>

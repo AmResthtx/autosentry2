@@ -8,6 +8,7 @@ import android.content.Intent;
 import androidx.core.app.NotificationCompat;
 
 import com.autosentry.app.data.MaintenanceDao;
+import com.autosentry.app.data.SessionDao;
 import com.autosentry.app.data.VehicleProfile;
 import com.autosentry.app.notifications.NotificationUtils;
 import com.autosentry.app.settings.AppSettings;
@@ -24,7 +25,7 @@ import java.util.Set;
  *
  *  - Runs when a trip ends (truck parked), never mid-drive.
  *  - SAFETY items alert at 80%, STANDARD items only once overdue, QUIET items
- *    never — they just show in the Service tab.
+ *    never — they just show on the History tab.
  *  - Each item alerts once per stage (due soon → overdue). An overdue item
  *    gets at most one reminder every 14 days after that.
  *  - Everything due is bundled into ONE notification, with a "do together"
@@ -38,13 +39,14 @@ public final class ServiceAlertPolicy {
 
     private ServiceAlertPolicy() {}
 
-    public static void checkAndNotify(Context context, VehicleProfile profile, MaintenanceDao dao) {
+    public static void checkAndNotify(Context context, VehicleProfile profile, MaintenanceDao dao, SessionDao sessions) {
         if (profile == null) return;
         long now = System.currentTimeMillis();
         long trackingStart = AppSettings.getMaintenanceTrackingStart(context);
         Set<String> hidden = AppSettings.getHiddenServiceItems(context);
 
-        List<ServiceStatus> all = MaintenanceScheduleEngine.computeAll(profile, dao, trackingStart);
+        List<ServiceStatus> all = MaintenanceScheduleEngine.computeAll(profile, dao, trackingStart,
+                sessions.milesSince(trackingStart));
         List<ServiceStatus> toAlert = new ArrayList<>();
         for (ServiceStatus status : all) {
             String key = status.type.name();

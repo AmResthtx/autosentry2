@@ -2,68 +2,366 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/dashboard_bg">
+    android:orientation="horizontal">
 
-    <!-- Tab Bar -->
+    <!-- Left menu -->
+    <ScrollView
+        android:layout_width="88dp"
+        android:layout_height="match_parent"
+        android:background="@color/fs_rail"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/buttonTabDashboard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_menu_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="4dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp">
+
+                <ImageView
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_menu_dashboard" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Dashboard"
+                    android:textColor="@color/fs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Live gauges from the truck"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/buttonTabDiagnostics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_menu_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="4dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp">
+
+                <ImageView
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_menu_checks" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Checks"
+                    android:textColor="@color/fs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Key-on checks and trouble codes"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/buttonTabService"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_menu_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="4dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp">
+
+                <ImageView
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_menu_history" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="History"
+                    android:textColor="@color/fs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Oil life, service and trips"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/buttonTabDeals"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_menu_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="4dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp">
+
+                <ImageView
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_menu_deals" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Deals"
+                    android:textColor="@color/fs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Parts your schedule calls for"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/buttonTabAccount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_menu_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="4dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp">
+
+                <ImageView
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_menu_account" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Account"
+                    android:textColor="@color/fs_text"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Adapter, setup and tracking"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="@color/card_bg"
-        android:padding="8dp"
-        android:elevation="4dp">
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
 
-        <Button
-            android:id="@+id/buttonTabDashboard"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/tab_dashboard"
-            android:textColor="@color/textPrimary"
-            android:backgroundTint="@color/colorPrimary"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            android:padding="12dp" />
+        <!-- Toolbar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@color/fs_toolbar"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="4dp">
 
-        <Button
-            android:id="@+id/buttonTabService"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="@string/tab_service"
-            android:textColor="@color/textPrimary"
-            android:backgroundTint="@color/card_border"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            android:padding="12dp" />
+            <TextView
+                android:id="@+id/textToolbarTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Dashboard"
+                android:textColor="@color/fs_toolbar_text"
+                android:textSize="18sp" />
 
-        <Button
-            android:id="@+id/buttonTabCodes"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="@string/tab_codes"
-            android:textColor="@color/textPrimary"
-            android:backgroundTint="@color/card_border"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            android:padding="12dp" />
-    </LinearLayout>
+            <LinearLayout
+                android:id="@+id/toolbarActions"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+            <ImageButton
+                android:id="@+id/buttonToggleTracking"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Start tracking"
+                android:src="@drawable/ic_tb_play" />
+
+            <ImageButton
+                android:id="@+id/buttonZoomOut"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Smaller gauges"
+                android:src="@drawable/ic_tb_zoom_out" />
+
+            <ImageButton
+                android:id="@+id/buttonZoomIn"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Larger gauges"
+                android:src="@drawable/ic_tb_zoom_in" />
+
+            <ImageButton
+                android:id="@+id/buttonEditDashboard"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Choose readings"
+                android:src="@drawable/ic_tb_edit" />
+
+            <ImageButton
+                android:id="@+id/buttonInfo"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="About"
+                android:src="@drawable/ic_tb_info" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
         <!-- ================= DASHBOARD TAB ================= -->
         <ScrollView
             android:id="@+id/scrollDashboard"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:background="@color/fs_bg"
             android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="4dp">
+
+                    <TextView
+                        android:id="@+id/textHealth"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingTop="4dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="4dp"
+                        android:text="Idle"
+                        android:textColor="@color/fs_muted"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/textLiveStatus"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:text="Tracking is off"
+                        android:textColor="@color/fs_text"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/textAdapterStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="No OBD adapter paired yet"
+                    android:textColor="@color/fs_muted"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/textAlert"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:padding="10dp"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+                <GridLayout
+                    android:id="@+id/gridTiles"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:columnCount="5" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= DIAGNOSTICS TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollDiagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -71,371 +369,336 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <!-- Adapter Status Card -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="@string/check_engine_light" />
+
+                <TextView
+                    android:id="@+id/textMilStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Not scanned yet"
+                    android:textColor="@color/cyan_display"
+                    android:textSize="24sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <TextView
+                    android:id="@+id/textCodesScanInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="@string/trouble_codes" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="@string/codes_hint" />
+
                 <LinearLayout
+                    android:id="@+id/layoutCodesList"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp"
-                    android:layout_marginBottom="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/adapter_status"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:id="@+id/textAdapterStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="No OBD adapter paired yet"
-                        android:textColor="@color/reading_text"
-                        android:textSize="16sp"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-
-                <!-- Live Status Card -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp"
-                    android:layout_marginBottom="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/live_readings"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:id="@+id/textLiveStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/tracking_off"
-                        android:textColor="@color/amber_warning"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-
-                <!-- Dashboard Tiles Grid -->
-                <GridLayout
-                    android:id="@+id/gridTiles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:columnCount="2"
-                    android:layout_marginBottom="12dp" />
-
-                <!-- Action Buttons -->
-                <Button
-                    android:id="@+id/buttonEditDashboard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/edit_dashboard"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
 
                 <Button
-                    android:id="@+id/buttonToggleTracking"
+                    android:id="@+id/buttonScanCodes"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/start_tracking"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/green_ok"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="12dp" />
+                    android:layout_marginTop="12dp"
+                    android:text="@string/scan_codes" />
+
+                <Button
+                    android:id="@+id/buttonClearCodes"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/clear_codes" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textSize="12sp"
+                    android:textColor="#757575"
+                    android:text="@string/codes_disclaimer" />
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:background="@color/divider"
-                    android:layout_marginBottom="12dp" />
+                    android:background="@color/fs_divider"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp" />
 
-                <Button
-                    android:id="@+id/buttonPairAdapter"
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/pair_adapter"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="8dp" />
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="Key-on checks (KOEO)" />
 
-                <Button
-                    android:id="@+id/buttonAutoTrackingToggle"
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Auto-Tracking: On"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="Battery, readings and trouble codes at key-on before cranking, then how the crank went." />
 
                 <Button
-                    android:id="@+id/buttonBackgroundAccess"
+                    android:id="@+id/buttonKoeoCheck"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/background_access"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_marginTop="12dp"
+                    android:text="Run Key-On Check (key ON, engine off)" />
+
+                <TextView
+                    android:id="@+id/textKoeoReports"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textSize="15sp"
+                    android:lineSpacingMultiplier="1.15"
+                    android:textIsSelectable="true"
+                    android:text="Loading…" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/fs_divider"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="@string/truck_systems" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="Every module and reading this truck answers, as a report you can share. Park first." />
 
                 <Button
                     android:id="@+id/buttonSystemsScan"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/scan_truck_systems"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_marginTop="12dp"
+                    android:text="@string/scan_truck_systems" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= HISTORY TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollService"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/textOilLife"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="28sp"
+                    android:textStyle="bold"
+                    android:text="Oil life: --%" />
+
+                <TextView
+                    android:id="@+id/textOilDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="16sp"
+                    android:text="Since last oil change: -- mi, -- engine hrs" />
+
+                <TextView
+                    android:id="@+id/textOdometer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="16sp"
+                    android:text="Odometer: -- mi" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#33000000"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/textServiceHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="Service schedule" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="@string/service_hint" />
+
+                <LinearLayout
+                    android:id="@+id/layoutServiceList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <Button
+                    android:id="@+id/buttonSetOdometer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Set Odometer" />
+
+                <Button
+                    android:id="@+id/buttonResetOil"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Log Oil Change (quick)" />
+
+                <Button
+                    android:id="@+id/buttonLogMaintenance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Log Maintenance / Upgrade + Photos" />
+
+                <Button
+                    android:id="@+id/buttonMaintenanceHistory"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Maintenance History" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= DEALS TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollDeals"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:text="No deals matching alerts" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="14sp"
+                    android:textColor="#757575"
+                    android:text="Deals for parts your service schedule calls for will appear here." />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ================= ACCOUNT TAB ================= -->
+        <ScrollView
+            android:id="@+id/scrollAccount"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <Button
+                    android:id="@+id/buttonSetupWizard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="Setup Wizard" />
+
+                <Button
+                    android:id="@+id/buttonPairAdapter"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Pair OBD Adapter" />
+
+                <Button
+                    android:id="@+id/buttonTestConnection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Test OBD Connection" />
+
+                <Button
+                    android:id="@+id/buttonAutoTrackingToggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Auto-Tracking: On" />
+
+                <Button
+                    android:id="@+id/buttonBackgroundAccess"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Allow background start" />
+
+                <Button
+                    android:id="@+id/buttonSaveTrips"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Save trips to tablet" />
 
                 <Button
                     android:id="@+id/buttonDebugLog"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/view_debug_log"
-                    android:textColor="@color/textPrimary"
-                    android:backgroundTint="@color/card_border"
-                    android:textAllCaps="false" />
+                    android:layout_marginTop="12dp"
+                    android:text="View Debug Log" />
             </LinearLayout>
         </ScrollView>
-
-        <!-- ================= SERVICE TAB ================= -->
-        <ScrollView
-            android:id="@+id/scrollService"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone"
-            android:fillViewport="true">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <!-- Oil Life Card -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp"
-                    android:layout_marginBottom="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/oil_life"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:id="@+id/textOilLife"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Oil life: --%"
-                        android:textColor="@color/cyan_display"
-                        android:textSize="32sp"
-                        android:textStyle="bold"
-                        android:fontFamily="monospace" />
-
-                    <TextView
-                        android:id="@+id/textOilDetail"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Since last oil change: -- mi, -- engine hrs"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/textOdometer"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Odometer: -- mi"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <!-- Service Schedule Card -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/service_schedule"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/service_hint"
-                        android:textColor="@color/textDisabled"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:id="@+id/layoutServiceList"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="vertical" />
-
-                    <Button
-                        android:id="@+id/buttonMaintenanceHistory"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/maintenance_history"
-                        android:textColor="@color/textPrimary"
-                        android:backgroundTint="@color/card_border"
-                        android:textAllCaps="false" />
-                </LinearLayout>
-            </LinearLayout>
-        </ScrollView>
-
-        <!-- ================= CODES TAB ================= -->
-        <ScrollView
-            android:id="@+id/scrollCodes"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone"
-            android:fillViewport="true">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <!-- Check Engine Light Card -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp"
-                    android:layout_marginBottom="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/check_engine_light"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:id="@+id/textMilStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Not scanned yet"
-                        android:textColor="@color/cyan_display"
-                        android:textSize="24sp"
-                        android:textStyle="bold"
-                        android:fontFamily="monospace" />
-
-                    <TextView
-                        android:id="@+id/textCodesScanInfo"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <!-- Trouble Codes Card -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:background="@color/card_bg"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/trouble_codes"
-                        android:textColor="@color/label_text"
-                        android:textSize="12sp"
-                        android:textAllCaps="true"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/codes_hint"
-                        android:textColor="@color/textDisabled"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:id="@+id/layoutCodesList"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="vertical" />
-
-                    <Button
-                        android:id="@+id/buttonScanCodes"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/scan_codes"
-                        android:textColor="@color/textPrimary"
-                        android:backgroundTint="@color/colorPrimary"
-                        android:textAllCaps="false" />
-
-                    <Button
-                        android:id="@+id/buttonClearCodes"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/clear_codes"
-                        android:textColor="@color/textPrimary"
-                        android:backgroundTint="@color/card_border"
-                        android:textAllCaps="false" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/codes_disclaimer"
-                        android:textColor="@color/textDisabled"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </ScrollView>
-    </FrameLayout>
+        </FrameLayout>
+    </LinearLayout>
 </LinearLayout>

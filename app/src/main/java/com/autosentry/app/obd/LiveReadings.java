@@ -14,9 +14,15 @@ public final class LiveReadings {
     /** Latest decoded value per PID id, in display units. Missing key = no reading. */
     public static final Map<Integer, Double> values = new ConcurrentHashMap<>();
 
-    public static volatile String status = "Tracking is off";
+    public static final String IDLE_STATUS = "Tracking is off — tap Start Tracking";
+
+    public static volatile String status = IDLE_STATUS;
     public static volatile boolean engineRunning = false;
     public static volatile Set<Integer> supported = Collections.emptySet();
+
+    /** Output of the Account-tab connection test, built up line by line as it runs. */
+    public static volatile String testReport = "";
+    public static volatile boolean testRunning = false;
 
     private LiveReadings() {}
 

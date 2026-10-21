@@ -7,7 +7,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Hand-off between the Codes tab and TrackingService, which owns the adapter
+ * Hand-off between the trouble codes on the Checks tab and TrackingService, which owns the adapter
  * connection. The tab drops a request here; the service picks it up on its
  * next poll, talks to the truck, and publishes the result, the same way
  * LiveReadings carries live values.

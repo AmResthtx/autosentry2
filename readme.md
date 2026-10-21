@@ -95,9 +95,10 @@ sell the truck.
 
 ## What we're adding
 
-**Already working:** auto-start at key-on, live dashboard, trip MPG,
-mileage and engine-hour tracking, oil life, service schedule with
-due-soon alerts, and a maintenance log with photos.
+**Already working:** auto-start at key-on, live dashboard, trip MPG
+(simulator only so far; see below), mileage and engine-hour tracking, oil
+life, service schedule with due-soon alerts, a maintenance log with photos,
+a setup wizard, and a key-on check with crank timing on every start.
 
 **In progress, in priority order:**
 
@@ -116,21 +117,82 @@ due-soon alerts, and a maintenance log with photos.
    AutoSentry" down to "self-reported."
 6. **OBDLink recommendation in setup.** MX+ or LX. The app uses classic
    Bluetooth, and the CX is Bluetooth Low Energy only, so it won't connect.
-7. **Crank/no-start snapshot on every start.** RPM, battery voltage, and
-   pressure if the truck reports it.
-8. **Fault codes on the Codes tab.** Built, not yet tested on the truck:
+7. **Fault codes on the Checks tab.** Built, not yet tested on the truck:
    stored and pending codes read at every connect, a clear-codes button
    (key on, engine off only), and 206 7.3L codes, each with its severity
    and what to check shown right under it. The Truck Systems scan
-   (Dashboard tab) reports every module and PID this truck answers.
-9. **Deals tied to each service alert.** The right parts for the job
+   (Checks tab) reports every module and PID this truck answers.
+8. **Deals tied to each service alert.** The right parts for the job
    that's coming due.
-10. **Resale report export.** A PDF of the verified service history.
-11. **Opt-in anonymous data sharing.** Needed to show suppliers how many
+9. **Resale report export.** A PDF of the verified service history.
+10. **Opt-in anonymous data sharing.** Needed to show suppliers how many
     trucks are coming due for each part. The app keeps all data on the
     phone today.
+11. **Real MPG on the 7.3L.** The truck has no MAF sensor and likely doesn't
+    answer the standard fuel-rate PID, so MPG needs Ford's fuel-quantity
+    PID (MFDES, experimental in the PID catalog) instead.
 
 ## Roadmap
 
 - Other makes, models, and engines through configurable vehicle profiles.
 - Direct supplier partnerships once the numbers show demand.
+
+---
+
+## How it works
+
+Landing page: https://amresthtx.github.io/autosentry2/ (source in `site/`, published by `.github/workflows/pages.yml`).
+
+- **Automatic key-on tracking** — full-power monitoring (CPU awake, 4 polls a second, GPS, 1-second reconnects) runs only while the engine is turning and a trip is open. With the truck off the monitor drops to low power: adapter link closed so it can sleep, no GPS, no wake lock, and an exact alarm wakes the tablet every 15 seconds for one quick key-on check (unlocking the tablet or plugging in power checks at once). A trip starts within seconds of key-on even if the app was never opened. It restarts itself after a reboot, an app update, or a system kill (15-minute watchdog). A dropped link mid-drive is retried immediately and the gap is filled from GPS when location is allowed; the trip closes once the truck has been off (or the adapter silent) for 2 minutes. Only typing STOP or turning auto-tracking off keeps it down.
+- **Connection test** — Account > Test OBD Connection checks background-start permission, location, Bluetooth, the adapter link, adapter ID, OBD-port voltage, whether the truck computer answers, and live RPM/speed/oil temp, and says which step failed.
+- **Key-on check (KOEO)** — every key cycle, before cranking, AutoSentry snapshots battery voltage at the OBD port, every standard reading the truck answers (plus the 7.3L's Ford oil temp), and stored and pending trouble codes. It then times the crank (RPM above 0 but under 500), counts tries, and records the lowest cranking voltage and whether the engine started. Reports are on the Checks tab; **Run Key-On Check** takes one on demand with the key ON and the engine off. Ford's commanded self-tests (on-demand KOEO self-test, injector buzz test, glow plug test) are not sent: their 7.3L request bytes aren't verified here, and the buzz test energizes injectors.
+- **Pick your readings** — the list button in the Dashboard toolbar lists every supported reading (about 35, including coolant, load, EGR, torque, injection timing and, on the 7.3L, Ford ICP and IPR); ones the truck hasn't confirmed are labeled instead of hidden. The dashboard has a left menu, a light toolbar, and a grid of dial tiles with a white needle, round-number scale, colored value and the name underneath (the colors are per gauge and don't mean anything; an out-of-range gauge gets an amber or red border). The zoom buttons change how many tiles fit across, and holding a tile moves or removes it.
+- **Ford PID discovery** — `tools/obd_probe.py --forscan <file>` tries every 4-digit Mode 22 PID found in a FORScan export, and `--sweep 1000 1500` brute-forces a hex range; answering PIDs are logged with raw bytes so scaling can be matched against FORScan's on-screen value.
+- **Trouble codes** — stored and pending codes and the check engine light are read every time the truck starts answering, and on demand from the Checks tab. Each code shows its 7.3L meaning, a severity and what to check. **Clear Codes** (Mode 04) only runs key on, engine off.
+- **Truck Systems scan** — Checks > Scan Truck Systems reports the adapter, the bus, every module that answers, every standard reading with its live value, and a Mode 22 sweep of the PCM, as a text report you can share. It only reads.
+
+## Setup wizard
+
+First launch (and Account > Setup Wizard) walks through setup in phases. Phase 1 gets the app talking to the truck: permissions and background start, choosing the paired OBD adapter, running the truck connection test, choosing duty cycle and odometer, and picking the dashboard readings. Each step saves as you go. Later phases ship as further wizards; `AppSettings.getSetupPhaseDone` records how far you got.
+
+## Architecture
+
+```
+obd/            ELM327Adapter, DTCReader, DtcDictionary, VINDetector, TruckProbe
+                — adapter communication, vehicle responses, code decoding,
+                the 7.3L trouble-code list, and the Truck Systems scan
+engine/         OilLifeEngine — mileage, engine-hour, idle, and oil-temperature logic
+maintenance/    ServiceInterval, ServiceStatus, MaintenanceScheduleEngine,
+                ServiceAlertPolicy
+                — vehicle service intervals and due-soon/overdue tracking
+fuel/           MpgCalculator — MAF + GPS speed -> instantaneous/interval MPG
+gps/            GpsTracker — LocationManager wrapper, no Play Services dependency
+service/        TrackingService — foreground OBD + GPS persistence and notifications
+service/        TrackingWatchdogWorker — restarts tracking if the system killed it
+receiver/       BluetoothConnectionReceiver, BootReceiver — restart tracking on adapter
+                connect, reboot, and app update
+data/           Room entities/DAOs for PIDs, sessions, trip points, vehicle profile,
+                maintenance events, and photo attachments
+ui/             MainActivity, DebugLogActivity, LogMaintenanceActivity,
+                MaintenanceHistoryActivity
+```
+
+All storage is local (Room + SharedPreferences). No account or cloud dependency is required for the monitoring workflow.
+
+## Building
+
+```bash
+./gradlew assembleRelease
+```
+
+Outputs to `app/build/outputs/apk/release/app-release.apk`. Local and pull-request builds use the debug key unless persistent signing credentials are configured; published GitHub release builds require the persistent key described below.
+
+The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). CI builds use the GitHub Actions run number; local builds are build 1.
+
+### Installing updates without losing data
+
+Android keeps AutoSentry's local data when an APK is installed as an update. Keep the application ID (`com.autosentry.app`) unchanged, install a build with a higher version code, and sign every update with the same key. Do not uninstall AutoSentry or clear its storage.
+
+Published GitHub release APKs use a persistent signing keystore. Create a keystore once and store it securely; add its Base64-encoded contents and credentials as repository Actions secrets named `AUTOSENTRY_RELEASE_KEYSTORE_BASE64`, `AUTOSENTRY_RELEASE_STORE_PASSWORD`, `AUTOSENTRY_RELEASE_KEY_ALIAS`, and `AUTOSENTRY_RELEASE_KEY_PASSWORD`. The workflow requires these secrets for branch-push releases. Pull-request builds may use the debug key and should not be used as release updates.
+
+For example, create a new keystore with `keytool -genkeypair -v -keystore autosentry-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias autosentry`, then Base64-encode the file when adding the secret. Never commit the keystore or its passwords. **If the installed app was signed with a different key, the first update signed by this keystore will be rejected by Android.** Use the same original signing key for the transition; if it is unavailable, back up data before uninstalling because the signing key cannot be changed while preserving Android's app data.

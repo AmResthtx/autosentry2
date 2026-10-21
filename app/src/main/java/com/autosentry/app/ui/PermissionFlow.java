@@ -1,7 +1,8 @@
 package com.autosentry.app.ui;
 
 import android.Manifest;
-import android.bluetooth.BluetoothAdapter;
+import android.app.Activity;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.widget.Toast;
@@ -12,61 +13,64 @@ import androidx.core.content.ContextCompat;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Only Bluetooth is required (to talk to the adapter). Location (GPS speed
+ * fallback) and notifications (service alerts) are requested but optional,
+ * so denying them never blocks tracking.
+ */
 public final class PermissionFlow {
     private static final int PERMISSION_REQ = 1001;
 
     private PermissionFlow() {}
 
-    private static String[] requiredPerms() {
+    private static List<String> requiredPerms() {
+        List<String> perms = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT);
+        }
+        return perms;
+    }
+
+    private static List<String> optionalPerms() {
         List<String> perms = new ArrayList<>();
         perms.add(Manifest.permission.ACCESS_FINE_LOCATION);
         perms.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        perms.add(Manifest.permission.POST_NOTIFICATIONS);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            perms.add(Manifest.permission.BLUETOOTH_CONNECT);
-            perms.add(Manifest.permission.BLUETOOTH_SCAN);
-        } else {
-            perms.add(Manifest.permission.BLUETOOTH);
-            perms.add(Manifest.permission.BLUETOOTH_ADMIN);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
         }
-        return perms.toArray(new String[0]);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_SCAN);
+        }
+        return perms;
     }
 
-    public static boolean hasAllPermissions(MainActivity activity) {
+    private static boolean granted(Context context, String perm) {
+        return ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static boolean hasRequiredPermissions(Context context) {
         for (String perm : requiredPerms()) {
-            if (ContextCompat.checkSelfPermission(activity, perm) != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
+            if (!granted(context, perm)) return false;
         }
         return true;
     }
 
-    public static void requestAllPermissions(MainActivity activity) {
+    /** Asks for every missing permission, required and optional. */
+    public static void requestMissingPermissions(Activity activity) {
         List<String> missing = new ArrayList<>();
-        for (String perm : requiredPerms()) {
-            if (ContextCompat.checkSelfPermission(activity, perm) != PackageManager.PERMISSION_GRANTED) {
-                missing.add(perm);
-            }
+        List<String> all = requiredPerms();
+        all.addAll(optionalPerms());
+        for (String perm : all) {
+            if (!granted(activity, perm)) missing.add(perm);
         }
         if (!missing.isEmpty()) {
             ActivityCompat.requestPermissions(activity, missing.toArray(new String[0]), PERMISSION_REQ);
-            // BLUETOOTH_CONNECT (needed below by adapter.isEnabled() on API 31+) was
-            // just requested, not yet granted — permission results are asynchronous,
-            // so checking Bluetooth state now would crash with a SecurityException
-            // on a fresh install. Bail here; MainActivity re-checks once the app is
-            // actually used (e.g. Pair OBD Adapter), by which point the permission
-            // request has been answered.
-            return;
         }
+    }
 
-        try {
-            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-            if (adapter == null || !adapter.isEnabled()) {
-                Toast.makeText(activity, "Please pair your OBD adapter in Settings > Bluetooth", Toast.LENGTH_LONG).show();
-            }
-        } catch (SecurityException e) {
-            // Defensive: some OEM builds enforce BLUETOOTH_CONNECT even in paths
-            // Android's own docs don't require it for. Not fatal either way.
-        }
+    /** Android stops showing the dialog after repeated denials, so say where to fix it. */
+    public static void explainBluetoothDenied(Activity activity) {
+        Toast.makeText(activity, "Bluetooth (Nearby devices) permission is required to talk to the OBD adapter. "
+                + "Allow it in Settings > Apps > AutoSentry > Permissions.", Toast.LENGTH_LONG).show();
     }
 }

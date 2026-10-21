@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat;
 
 public final class NotificationUtils {
     public static final String CHANNEL_TRACKING = "tracking";
+    public static final String CHANNEL_WAITING = "waiting";
     public static final String CHANNEL_ALERTS = "service_alerts";
     public static final int TRACKING_NOTIFICATION_ID = 1001;
 
@@ -23,19 +24,27 @@ public final class NotificationUtils {
         channel.setDescription("Live OBD + GPS tracking while a trip is active");
         manager.createNotificationChannel(channel);
 
+        // Truck off: the service must stay up to notice key-on, but out of the way.
+        NotificationChannel waiting = new NotificationChannel(
+                CHANNEL_WAITING, "Waiting for Key-On", NotificationManager.IMPORTANCE_MIN);
+        waiting.setDescription("Shown while the truck is off and AutoSentry checks for key-on");
+        manager.createNotificationChannel(waiting);
+
         // Separate, louder channel: service warnings must actually get noticed,
         // unlike the always-on tracking notification which stays quiet.
         NotificationChannel alerts = new NotificationChannel(
                 CHANNEL_ALERTS, "Service Alerts", NotificationManager.IMPORTANCE_HIGH);
-        alerts.setDescription("Warns when a maintenance item is approaching its service interval");
+        alerts.setDescription("Maintenance coming due, engine stalls and crank results");
         manager.createNotificationChannel(alerts);
     }
 
-    public static NotificationCompat.Builder trackingNotificationBuilder(Context context) {
-        return new NotificationCompat.Builder(context, CHANNEL_TRACKING)
+    public static NotificationCompat.Builder trackingNotificationBuilder(Context context, boolean tripActive) {
+        return new NotificationCompat.Builder(context, tripActive ? CHANNEL_TRACKING : CHANNEL_WAITING)
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setContentTitle("AutoSentry tracking trip");
+                // Show right away instead of Android 12+'s default 10 s delay.
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setContentTitle(tripActive ? "AutoSentry tracking trip" : "AutoSentry: truck off");
     }
 }

@@ -1,20 +1,37 @@
 package com.autosentry.app.service;
 
+import android.Manifest;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.app.Service;
+import android.bluetooth.BluetoothAdapter;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.ServiceCompat;
+import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.data.AppDatabase;
+import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.Session;
 import com.autosentry.app.data.TripPoint;
 import com.autosentry.app.data.VehicleProfile;
+import com.autosentry.app.engine.CrankLog;
+import com.autosentry.app.engine.EngineWatch;
 import com.autosentry.app.engine.OilLifeEngine;
+import com.autosentry.app.engine.StallLog;
 import com.autosentry.app.fuel.MpgCalculator;
 import com.autosentry.app.gps.GpsTracker;
 import com.autosentry.app.maintenance.ServiceAlertPolicy;
@@ -23,21 +40,27 @@ import com.autosentry.app.obd.DTCReader;
 import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
-import com.autosentry.app.obd.OBDSimulator;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.obd.SystemsScan;
 import com.autosentry.app.obd.TruckProbe;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.AppLog;
+import com.autosentry.app.util.TabletFiles;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.DoubleAdder;
 
 /**
  * Foreground service that runs while the app is tracking: keeps the OBD
@@ -49,8 +72,18 @@ import java.util.concurrent.RejectedExecutionException;
  *   3. saves a TripPoint about once a second
  *
  * Distance comes from the truck's own speed reading when it reports one, and
- * from GPS otherwise. Uses OBDSimulator only when no adapter has been paired
- * at all — a real adapter that fails to connect is retried, never faked.
+ * from GPS otherwise (and from GPS across any gap in OBD data mid-drive).
+ * Requires a paired adapter; one that fails to connect is retried, never faked.
+ *
+ * An OBD adapter never opens the Bluetooth link itself — the tablet has to — so
+ * something must stay around to notice key-on. Two modes:
+ *   - Truck on (engine turning, trip open): full power. CPU kept awake, 4 polls
+ *     a second, GPS on, a dropped link retried every second.
+ *   - Truck off: low power. No wake lock, no GPS, adapter link closed so it can
+ *     sleep; an exact alarm wakes the tablet every 15 s for one quick knock, and
+ *     unlocking the screen or plugging in power knocks at once.
+ * It is restarted on boot, app update and by a 15-minute watchdog, and only a
+ * typed STOP or turning auto-tracking off keeps it down.
  */
 public class TrackingService extends Service {
     private static final String TAG = "TrackingService";
@@ -58,18 +91,35 @@ public class TrackingService extends Service {
     /** True from start until destroy; the dashboard uses it for the Start/Stop button. */
     public static volatile boolean isRunning = false;
 
+    /** Runs the step-by-step adapter check (see runConnectionTest) on the poll thread. */
+    public static final String ACTION_RUN_TEST = "com.autosentry.app.RUN_CONNECTION_TEST";
+    /** Takes a key-on-engine-off snapshot now (key ON, engine off); report goes to LiveReadings.testReport. */
+    public static final String ACTION_RUN_KOEO = "com.autosentry.app.RUN_KOEO_CHECK";
+    private static final String ACTION_IDLE_CHECK = "com.autosentry.app.IDLE_CHECK";
+
     private static final long POLL_INTERVAL_MS = 250L;
-    private static final long RETRY_INTERVAL_MS = 5000L;
+    // Mid-trip link loss: retry as fast as the adapter allows (a failed connect already takes ~5 s).
+    private static final long RETRY_INTERVAL_MS = 1000L;
+    // Truck off: one knock this often. Covers the 7.3L's glow-plug wait between key-on and crank.
+    private static final long IDLE_CHECK_INTERVAL_MS = 15_000L;
     private static final long PERSIST_INTERVAL_MS = 1000L;
     private static final long END_TRIP_AFTER_ENGINE_OFF_MS = 120_000L;
-    private static final long GIVE_UP_WITHOUT_ADAPTER_MS = 10 * 60_000L;
     // A longer gap than this (reconnect, stall) is not driving time; don't bill it to the trip.
     private static final double MAX_TICK_SECONDS = 5.0;
     // Renewed on every poll tick so it never outlives the service, but survives any one gap.
     private static final long WAKE_LOCK_TIMEOUT_MS = 60_000L;
-    // Oil temp moves slowly; reading it every 5 s keeps the bus free, which matters when each
-    // read is three commands (aim at the PCM, read, aim back).
-    private static final long FORD_OIL_TEMP_INTERVAL_MS = 5000L;
+    // A missed first answer (bus still waking up) must not hide oil temp for the whole drive.
+    private static final long OIL_PROBE_RETRY_MS = 30_000L;
+    // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
+    private static final long OIL_READ_INTERVAL_MS = 2_000L;
+    // ICP/IPR (Ford Mode 22) are read only while one is on the dashboard, with the same header-switch cost.
+    private static final long ICP_READ_INTERVAL_MS = 1_000L;
+    private static final long FORD_EXTRA_READ_INTERVAL_MS = 2_000L;
+    // GPS below this is parked jitter, not driving.
+    private static final double GPS_MOVING_MPH = 3.0;
+    private static final double STARTED_RPM = EngineWatch.RUNNING_RPM;
+    private static final int STALL_ALERT_ID = 3000;
+    private static final int CRANK_ALERT_ID = 3001;
 
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -78,8 +128,6 @@ public class TrackingService extends Service {
     private AppDatabase db;
     private GpsTracker gpsTracker;
     private ELM327Adapter realAdapter;
-    private OBDSimulator simulator;
-    private boolean useRealAdapter;
     private boolean started = false;
     private volatile boolean stopped = false;
 
@@ -88,9 +136,22 @@ public class TrackingService extends Service {
     private Set<Integer> supportedPids = Collections.emptySet();
     // True when the truck answers Ford's enhanced oil-temp PID (7.3L) instead of the standard one.
     private boolean fordOilTemp = false;
-    // Read trouble codes once every time the truck starts answering, so the Codes tab is never stale.
+    private boolean pwmBus = false;
+    private boolean canBus = false;
+    // This key cycle's KOEO report: captured before cranking, saved again when the crank ends.
+    private KoeoReport koeo;
+    private boolean koeoDue = false;
+    private long crankStart = 0;
+    private long lastOilProbe = 0;
+    private long lastOilRead = 0;
+    private long lastIcpRead = 0;
+    private long lastFordExtraRead = 0;
+    // Stall alert while running; second-by-second RPM swings only while cranking.
+    private final EngineWatch engineWatch = new EngineWatch();
+    private final StallLog stallLog = new StallLog();
+    private CrankLog crankLog; // non-null while the starter is turning
+    // Read trouble codes once every time the truck starts answering, so the Checks tab is never stale.
     private boolean autoScanPending = false;
-    private long lastFordOilReadMs = 0;
 
     // Adapter traffic for the debug log: connection setup, code reads and scans, never the
     // 4-a-second poll. A repeat (key-off "NO DATA" every 5 s) is counted, not written again.
@@ -112,20 +173,63 @@ public class TrackingService extends Service {
     private volatile double lastLat = 0, lastLon = 0;
     private long lastTickTimestamp;
     private long lastPersistTimestamp;
+    // Last moment the truck answered (or the service started); ends a trip once the link stays down.
     private long lastConnectedTimestamp;
+    private String lastConnectError;
+    private boolean gpsOn = false;
+    // GPS miles since the last OBD tick; billed only when a gap in OBD data hides the driving.
+    private final DoubleAdder gpsGapMiles = new DoubleAdder();
+    private volatile long lastGpsMovingTimestamp = 0;
     private long engineOffSince = 0;
     private int connectFailures = 0;
     private double distanceSincePoint = 0;
     private double lastInstantMpg = 0;
+    // Driving not yet written to the profile row; flushed as deltas once a second.
+    private double pendingMiles, pendingHours, pendingGallons, pendingOilPercent;
+    // Shown on the dashboard after the service stops, instead of the plain "off" status.
+    private volatile String stopReason;
 
     private final Runnable pollTask = this::pollTick;
+    // True while the poll loop is parked on the idle alarm; whoever flips it back owns restarting the loop.
+    private final AtomicBoolean idleWaiting = new AtomicBoolean(false);
+    private PendingIntent idleCheckIntent;
+
+    // Screen unlocked or power plugged in (truck-powered chargers switch on at key-on): knock now.
+    private final BroadcastReceiver wakeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            wakeFromIdle();
+        }
+    };
+
+    /**
+     * Starts tracking unless the user turned it off (auto-tracking off or typed STOP).
+     * Used by app launch, boot, the Bluetooth receiver and the watchdog.
+     */
+    public static void startIfEnabled(Context context, String why) {
+        if (isRunning) return;
+        if (!AppSettings.isAutoTrackingEnabled(context) || AppSettings.isTrackingPaused(context)) return;
+        if (!AppSettings.hasObdAdapterConfigured(context)) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        try {
+            ContextCompat.startForegroundService(context, new Intent(context, TrackingService.class));
+            AppLog.i(context, TAG, "Tracking started (" + why + ")");
+        } catch (RuntimeException e) {
+            // Android 12+ blocks background starts unless the app is exempt from battery optimization.
+            AppLog.e(context, TAG, "Android blocked tracking start (" + why
+                    + "); allow background start in the Account tab", e);
+        }
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
         db = AppDatabase.getInstance(this);
         gpsTracker = new GpsTracker(this);
-        simulator = new OBDSimulator();
         NotificationUtils.ensureChannels(this);
 
         // Without this, the tablet suspends its CPU when the screen turns off and the
@@ -135,34 +239,84 @@ public class TrackingService extends Service {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AutoSentry:tracking");
             wakeLock.setReferenceCounted(false);
         }
+
+        idleCheckIntent = PendingIntent.getService(this, 0,
+                new Intent(this, TrackingService.class).setAction(ACTION_IDLE_CHECK),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        IntentFilter wakeEvents = new IntentFilter(Intent.ACTION_USER_PRESENT);
+        wakeEvents.addAction(Intent.ACTION_SCREEN_ON);
+        wakeEvents.addAction(Intent.ACTION_POWER_CONNECTED);
+        ContextCompat.registerReceiver(this, wakeReceiver, wakeEvents, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (started) return START_STICKY; // already running; a second start must not spawn a second poll loop
+        boolean runTest = intent != null && ACTION_RUN_TEST.equals(intent.getAction());
+        boolean runKoeo = intent != null && ACTION_RUN_KOEO.equals(intent.getAction());
+        if (started) {
+            // Already running; a second start must not spawn a second poll loop.
+            if (runTest) queueConnectionTest();
+            if (runKoeo) queueKoeoCheck();
+            if (runTest || runKoeo || (intent != null && ACTION_IDLE_CHECK.equals(intent.getAction()))) wakeFromIdle();
+            return START_STICKY;
+        }
         started = true;
 
         // The adapter comes from saved settings, not the intent, so a system
         // restart (which delivers a null intent) still talks to the real adapter.
         String adapterAddress = AppSettings.getObdAdapterAddress(this);
-        useRealAdapter = adapterAddress != null && !adapterAddress.isEmpty();
-        if (useRealAdapter) {
-            realAdapter = new ELM327Adapter(adapterAddress);
-        }
 
         try {
-            startForeground(NotificationUtils.TRACKING_NOTIFICATION_ID, buildNotification("Starting..."));
+            startInForeground();
         } catch (RuntimeException e) {
-            // Android refused to let a background app start a foreground service.
+            // Android refused the foreground service (missing permission or background start).
             AppLog.e(this, TAG, "Could not start foreground service", e);
+            stopReason = "Couldn't start tracking: " + e.getMessage();
+            if (runTest || runKoeo) endTestEarly("✗ " + stopReason);
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (adapterAddress == null || adapterAddress.isEmpty()) {
+            stopReason = "No OBD adapter paired — tap Pair OBD Adapter in Account";
+            if (runTest || runKoeo) endTestEarly("✗ No OBD adapter paired — tap Pair OBD Adapter first.");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        realAdapter = new ELM327Adapter(adapterAddress);
         isRunning = true;
-        LiveReadings.status = useRealAdapter ? "Connecting to OBD adapter…" : "Simulator (no adapter paired)";
+        LiveReadings.status = "Connecting to OBD adapter…";
 
         ioExecutor.execute(this::initState);
+        if (runTest) queueConnectionTest();
+        if (runKoeo) queueKoeoCheck();
         return START_STICKY;
+    }
+
+    /**
+     * Android 14+ checks each declared foreground type: location needs a location
+     * grant and is refused when started from the background (the Bluetooth
+     * receiver), connectedDevice needs BLUETOOTH_CONNECT. Ask only for what is
+     * granted, and fall back to OBD-only tracking when location is refused.
+     */
+    private void startInForeground() {
+        int connected = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
+        int location = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+        boolean btGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+        int types = (btGranted ? connected : 0) | (gpsTracker.hasPermission() ? location : 0);
+        if (types == 0) types = connected; // fails below with Android's own permission message
+        android.app.Notification notification = buildNotification("Starting...");
+        try {
+            ServiceCompat.startForeground(this, NotificationUtils.TRACKING_NOTIFICATION_ID, notification, types);
+        } catch (RuntimeException e) {
+            if (types == (connected | location)) {
+                AppLog.i(this, TAG, "Location foreground refused, tracking without GPS: " + e.getMessage());
+                ServiceCompat.startForeground(this, NotificationUtils.TRACKING_NOTIFICATION_ID, notification, connected);
+            } else {
+                throw e;
+            }
+        }
     }
 
     private void initState() {
@@ -185,18 +339,34 @@ public class TrackingService extends Service {
         lastPersistTimestamp = now;
         lastConnectedTimestamp = now;
 
-        mainHandler.post(() -> {
-            try {
-                gpsTracker.start((lat, lon, speedMph, distanceDeltaMiles) -> {
-                    lastLat = lat;
-                    lastLon = lon;
-                    lastSpeedMph = speedMph;
-                });
-            } catch (SecurityException e) {
-                // No location while in the background; speed comes from the truck instead.
-            }
-            mainHandler.post(pollTask);
-        });
+        mainHandler.post(pollTask);
+    }
+
+    /** Main thread only. GPS runs from truck contact until the trip ends, not all night in the driveway. */
+    private void startGps() {
+        if (gpsOn) return;
+        gpsOn = true;
+        gpsGapMiles.reset();
+        try {
+            gpsTracker.start((lat, lon, speedMph, distanceDeltaMiles) -> {
+                lastLat = lat;
+                lastLon = lon;
+                lastSpeedMph = speedMph;
+                if (speedMph >= GPS_MOVING_MPH) {
+                    lastGpsMovingTimestamp = System.currentTimeMillis();
+                    gpsGapMiles.add(distanceDeltaMiles);
+                }
+            });
+        } catch (SecurityException e) {
+            // No location while in the background; speed comes from the truck instead.
+        }
+    }
+
+    private void stopGps() {
+        if (!gpsOn) return;
+        gpsOn = false;
+        gpsTracker.stop();
+        lastSpeedMph = 0;
     }
 
     private void pollTick() {
@@ -205,35 +375,98 @@ public class TrackingService extends Service {
         try {
             ioExecutor.execute(() -> {
                 long delay = POLL_INTERVAL_MS;
+                boolean truckOff;
                 try {
                     if (stopped) return;
-                    if (useRealAdapter) realAdapter.setTrace(adapterTrace);
+                    realAdapter.setTrace(adapterTrace);
                     if (!ensureConnected() || !ensureTruckAnswering()) {
                         dropRequests();
                         delay = RETRY_INTERVAL_MS;
+                        truckOff = activeSession == null; // mid-trip: keep retrying at full speed
                     } else {
                         handleCodeRequest();
                         if (handleSystemsScan()) {
                             delay = RETRY_INTERVAL_MS; // reconnects first
+                            truckOff = false;
                         } else {
-                            if (useRealAdapter) realAdapter.setTrace(null);
+                            realAdapter.setTrace(null);
                             pollOnce();
+                            truckOff = parkedLongEnough(System.currentTimeMillis());
                         }
                     }
                 } catch (Exception e) {
                     AppLog.e(this, TAG, "Poll failed, will reconnect", e);
                     handleLinkLoss();
                     delay = RETRY_INTERVAL_MS;
+                    truckOff = activeSession == null;
                 }
-                if (!stopped) mainHandler.postDelayed(pollTask, delay);
+                if (stopped) return;
+                if (truckOff) {
+                    waitForKeyOn();
+                } else {
+                    mainHandler.postDelayed(pollTask, delay);
+                }
             });
         } catch (RejectedExecutionException ignored) {
             // Service is shutting down.
         }
     }
 
+    /** Connected but no trip and the engine has been off as long as it takes to close one. */
+    private boolean parkedLongEnough(long now) {
+        return activeSession == null && engineOffSince != 0
+                && now - engineOffSince > END_TRIP_AFTER_ENGINE_OFF_MS;
+    }
+
+    /**
+     * Low-power mode until the next knock: drop the adapter link so it can sleep, stop GPS,
+     * release the wake lock, and let an exact alarm wake the tablet for the next check.
+     */
+    private void waitForKeyOn() {
+        finishKoeo(); // key cycle over: keep whatever the crank showed (or that it never cranked)
+        long now = System.currentTimeMillis();
+        onEngineEvents(engineWatch.update(now, null), now, null); // truck off: a crank still open ends as no start
+        if (realAdapter.isConnected()) {
+            realAdapter.disconnect();
+            supportedPids = Collections.emptySet();
+        }
+        engineOffSince = 0;
+        LiveReadings.clearValues();
+        LiveReadings.status = "Truck off — waiting for key-on";
+        updateNotification("Waiting for key-on");
+        mainHandler.post(this::stopGps);
+
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        boolean exactAllowed = alarms != null
+                && (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms());
+        if (!exactAllowed) {
+            // Without exact alarms nothing wakes a sleeping tablet on time, so stay awake
+            // and knock on a timer rather than miss key-on.
+            mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
+        idleWaiting.set(true);
+        try {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + IDLE_CHECK_INTERVAL_MS, idleCheckIntent);
+        } catch (SecurityException e) {
+            // Permission pulled since the check; stay awake instead (unless a wake event already took over).
+            if (idleWaiting.compareAndSet(true, false)) mainHandler.postDelayed(pollTask, IDLE_CHECK_INTERVAL_MS);
+            return;
+        }
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+    }
+
+    /** Ends the low-power wait early (alarm fired, screen on, power in, test asked) and polls now. */
+    private void wakeFromIdle() {
+        if (!idleWaiting.compareAndSet(true, false)) return; // loop already running
+        if (wakeLock != null) wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        if (alarms != null) alarms.cancel(idleCheckIntent);
+        mainHandler.post(pollTask);
+    }
+
     private boolean ensureConnected() {
-        if (!useRealAdapter) return true;
         if (realAdapter.isConnected()) return true;
 
         LiveReadings.clearValues();
@@ -241,29 +474,42 @@ public class TrackingService extends Service {
         supportedPids = Collections.emptySet();
         try {
             realAdapter.connect();
+            AppLog.i(this, TAG, "OBD adapter connected"
+                    + (connectFailures > 0 ? " after " + connectFailures + " attempts" : ""));
             connectFailures = 0;
-            lastConnectedTimestamp = System.currentTimeMillis();
-            AppLog.i(this, TAG, "OBD adapter connected");
+            lastConnectError = null;
             return true;
         } catch (IOException | InterruptedException | RuntimeException e) {
             realAdapter.disconnect();
             connectFailures++;
-            if (connectFailures == 1 || connectFailures % 12 == 0) {
-                AppLog.e(this, TAG, "OBD adapter connect failed (attempt " + connectFailures + ")", e);
+            lastConnectError = e.getMessage();
+            // Normal while the truck is off (adapter asleep), so log the outage once, not every retry.
+            if (connectFailures == 1) {
+                AppLog.e(this, TAG, "OBD adapter not reachable, retrying until it is", e);
             }
-            LiveReadings.status = "Can't reach OBD adapter — retrying";
-            updateNotification("Waiting for OBD adapter…");
-            if (System.currentTimeMillis() - lastConnectedTimestamp > GIVE_UP_WITHOUT_ADAPTER_MS) {
-                AppLog.i(this, TAG, "No adapter for a long time, stopping. Reopen the app or reconnect to restart.");
-                stopSelf();
-            }
+            LiveReadings.status = "Waiting for OBD adapter (truck off?) — retrying";
+            updateNotification("Waiting for the truck — connects automatically at key-on");
+            endTripIfOffline(System.currentTimeMillis());
             return false;
+        }
+    }
+
+    /**
+     * Truck off means the adapter sleeps and the link drops; close the trip once that has
+     * lasted as long as an engine-off would, unless GPS shows we are still driving.
+     */
+    private void endTripIfOffline(long now) {
+        if (now - lastConnectedTimestamp <= END_TRIP_AFTER_ENGINE_OFF_MS) return;
+        if (now - lastGpsMovingTimestamp <= END_TRIP_AFTER_ENGINE_OFF_MS) return;
+        if (activeSession != null) {
+            endSession(now);
+        } else {
+            mainHandler.post(this::stopGps); // key-on without a drive still started GPS
         }
     }
 
     /** Adapter is linked, but the truck's computer may not be awake yet (key off). */
     private boolean ensureTruckAnswering() throws IOException {
-        if (!useRealAdapter) return true;
         if (!supportedPids.isEmpty()) return true;
 
         Set<Integer> found = realAdapter.readSupportedPids();
@@ -271,22 +517,270 @@ public class TrackingService extends Service {
             LiveReadings.status = "Adapter connected — truck not responding (turn key on)";
             LiveReadings.clearValues();
             updateNotification("Adapter connected, truck not responding");
+            endTripIfOffline(System.currentTimeMillis());
             return false;
         }
         supportedPids = found;
+        lastConnectedTimestamp = System.currentTimeMillis();
+        mainHandler.post(this::startGps);
+        String protocol = realAdapter.describeProtocol();
+        String upper = protocol.toUpperCase(java.util.Locale.US);
+        pwmBus = upper.contains("PWM");
+        canBus = upper.contains("CAN") || upper.contains("15765");
+        if (koeo == null) koeoDue = true; // fresh truck contact: snapshot it if the engine isn't running yet
         autoScanPending = true;
-        fordOilTemp = !found.contains(PidCatalog.ENGINE_OIL_TEMP)
+        probeFordOilTemp();
+        AppLog.i(this, TAG, "Truck answered on " + protocol
+                + "; supported PIDs: " + describePids(found)
+                + "; Ford oil temp (22 1310): " + describeOilTempSource());
+        return true;
+    }
+
+    /**
+     * Standard Mode 01 oil temp when the truck has it; otherwise Ford's enhanced PID,
+     * which only exists on the J1850 PWM bus. Also offers "Engine Oil Temp" in the
+     * dashboard editor when either source works.
+     */
+    private void probeFordOilTemp() throws IOException {
+        lastOilProbe = System.currentTimeMillis();
+        fordOilTemp = pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)
                 && !Double.isNaN(realAdapter.readFordEngineOilTempC());
-        // Offer "Engine Oil Temp" in the dashboard editor when either source works.
-        Set<Integer> offered = new LinkedHashSet<>(found);
+        Set<Integer> offered = new LinkedHashSet<>(supportedPids);
         if (fordOilTemp) offered.add(PidCatalog.ENGINE_OIL_TEMP);
+        if (pwmBus) {
+            offered.add(PidCatalog.FORD_ICP);
+            offered.add(PidCatalog.FORD_IPR);
+            for (PidCatalog.Pid pid : PidCatalog.all()) {
+                if (pid.fordCode != null) offered.add(pid.id);
+            }
+        }
         LiveReadings.supported = offered;
         AppSettings.setSupportedPids(this, offered);
-        AppLog.i(this, TAG, "Truck answered on " + realAdapter.describeProtocol()
-                + "; supported PIDs: " + describePids(found)
-                + "; Ford enhanced oil temp: " + (fordOilTemp
-                        ? (realAdapter.usesPcmAddressing() ? "yes, addressed straight to the PCM" : "yes") : "no"));
-        return true;
+    }
+
+    private String describeOilTempSource() {
+        if (supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)) return "not needed, standard PID 5C answers";
+        if (!pwmBus) return "not tried, bus is not J1850 PWM";
+        if (fordOilTemp) return "yes";
+        return "no answer, reply '" + realAdapter.lastEnhancedReply() + "' (retrying every 30 s)";
+    }
+
+    private static void endTestEarly(String report) {
+        LiveReadings.testReport = report;
+        LiveReadings.testRunning = false;
+    }
+
+    private void queueConnectionTest() {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = "Starting test…";
+        try {
+            ioExecutor.execute(this::runConnectionTest);
+        } catch (RejectedExecutionException e) {
+            endTestEarly("✗ Tracking is shutting down — try again.");
+        }
+    }
+
+    /**
+     * Walks the whole chain the trip depends on — phone settings, Bluetooth link,
+     * adapter, truck computer, live readings — and says which link is broken.
+     * Runs on the poll thread, so it never fights the poll loop for the adapter.
+     */
+    private void runConnectionTest() {
+        StringBuilder r = new StringBuilder();
+        boolean ok = true;
+        try {
+            PowerManager pm = getSystemService(PowerManager.class);
+            boolean exempt = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+            ok &= testLine(r, exempt, "Background start allowed",
+                    "Background start NOT allowed — Android can block key-on auto-start. Fix: Account > Allow background start");
+            AlarmManager alarms = getSystemService(AlarmManager.class);
+            testLine(r, Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                            || (alarms != null && alarms.canScheduleExactAlarms()),
+                    "Alarms allowed (low-power waiting while the truck is off)",
+                    "Alarms not allowed — the tablet stays awake while the truck is off. Fix: Account > Allow low-power waiting");
+            testLine(r, gpsTracker.hasPermission(), "Location allowed (GPS fills OBD gaps)",
+                    "Location not allowed — distance relies on the truck's speed only");
+
+            BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
+            boolean btOn = bt != null && bt.isEnabled();
+            ok &= testLine(r, btOn, "Bluetooth on", "Bluetooth is off — turn it on");
+            if (!btOn) return;
+            String name = AppSettings.getObdAdapterName(this);
+            r.append("• Adapter: ").append(name != null ? name : "?")
+                    .append(" (").append(AppSettings.getObdAdapterAddress(this)).append(")\n");
+            publishTest(r, true);
+
+            long t0 = System.currentTimeMillis();
+            boolean wasConnected = realAdapter.isConnected();
+            boolean linked = ensureConnected();
+            ok &= testLine(r, linked,
+                    wasConnected ? "Bluetooth link up" : "Bluetooth link up (connected in "
+                            + (System.currentTimeMillis() - t0) / 100 / 10.0 + " s)",
+                    "Can't reach the adapter: " + lastConnectError
+                            + ". Is it plugged in and awake? Most adapters sleep until the key is turned on.");
+            if (!linked) return;
+
+            r.append("• Adapter ID: ").append(realAdapter.identify()).append('\n');
+            r.append("• Voltage at OBD port: ").append(realAdapter.readVoltage())
+                    .append(" (about 12.6 V key off, 13.5–14.5 V engine running)\n");
+            publishTest(r, true);
+
+            boolean truck = ensureTruckAnswering();
+            ok &= testLine(r, truck, "Truck computer answering on " + realAdapter.describeProtocol()
+                            + " — " + supportedPids.size() + " standard readings available",
+                    "Truck computer not answering — turn the key to ON and run the test again");
+            if (!truck) return;
+
+            for (int id : new int[]{PidCatalog.RPM, PidCatalog.SPEED, PidCatalog.ENGINE_OIL_TEMP}) {
+                PidCatalog.Pid def = PidCatalog.get(id);
+                double value = Double.NaN;
+                if (id == PidCatalog.ENGINE_OIL_TEMP && fordOilTemp) {
+                    double c = realAdapter.readFordEngineOilTempC();
+                    if (!Double.isNaN(c)) value = c * 9.0 / 5.0 + 32.0;
+                } else if (supportedPids.contains(id)) {
+                    value = def.decode(realAdapter.readPid(id));
+                }
+                r.append("• ").append(def.label()).append(": ")
+                        .append(Double.isNaN(value) ? "no answer" : def.formatValue(value)).append('\n');
+                publishTest(r, true);
+            }
+        } catch (IOException | RuntimeException e) {
+            ok = false;
+            r.append("✗ Adapter stopped answering mid-test: ").append(e.getMessage()).append('\n');
+            handleLinkLoss();
+        } finally {
+            r.append(ok ? "\nPASS — the truck will be tracked from key-on."
+                    : "\nFix the ✗ items above, then run the test again.");
+            publishTest(r, false);
+            AppLog.i(this, TAG, "Connection test:\n" + r);
+        }
+    }
+
+    private static boolean testLine(StringBuilder r, boolean pass, String passText, String failText) {
+        r.append(pass ? "✓ " : "✗ ").append(pass ? passText : failText).append('\n');
+        LiveReadings.testReport = r.toString();
+        return pass;
+    }
+
+    private static void publishTest(StringBuilder r, boolean running) {
+        LiveReadings.testReport = r.toString();
+        LiveReadings.testRunning = running;
+    }
+
+    /**
+     * KOEO: the first look at the truck in a key cycle, before the engine turns, gets a
+     * snapshot. After that, RPM between 0 and STARTED_RPM is cranking: time it and track
+     * the lowest battery voltage until the engine starts or the crank gives up.
+     */
+    private void trackKeyOnAndCrank(long now, Double rpm, boolean engineRunning) throws IOException {
+        if (koeoDue) {
+            koeoDue = false;
+            if (!engineRunning) captureKoeo(now); // already running = joined mid-drive, nothing to capture
+        }
+        if (koeo == null || koeo.started || rpm == null) return; // no RPM answer this tick: no information
+        if (rpm > 0 && rpm < STARTED_RPM) {
+            if (crankStart == 0) {
+                crankStart = now;
+                koeo.crankAttempts++;
+            }
+            double v = realAdapter.readVolts();
+            if (v > 0 && (koeo.minCrankVolts == 0 || v < koeo.minCrankVolts)) koeo.minCrankVolts = v;
+        } else if (rpm >= STARTED_RPM) {
+            koeo.started = true;
+            if (crankStart != 0) {
+                koeo.crankSeconds = (now - crankStart) / 1000.0;
+            } else if (koeo.crankAttempts == 0) {
+                koeo.crankAttempts = 1; // cranked and caught between two readings
+            }
+            finishKoeo();
+        } else if (crankStart != 0) {
+            koeo.crankSeconds = (now - crankStart) / 1000.0; // RPM fell back to 0: that try didn't start
+            crankStart = 0;
+            db.koeoReportDao().update(koeo);
+        }
+    }
+
+    private void captureKoeo(long now) throws IOException {
+        finishKoeo();
+        KoeoReport r = new KoeoReport();
+        r.timestamp = now;
+        r.keyOnVolts = realAdapter.readVolts();
+        StringBuilder text = new StringBuilder();
+        for (PidCatalog.Pid def : PidCatalog.all()) {
+            if (def.computed || !supportedPids.contains(def.id)) continue;
+            double value = def.decode(realAdapter.readPid(def.id));
+            if (!Double.isNaN(value)) text.append(def.label()).append(": ").append(def.formatValue(value)).append('\n');
+        }
+        if (fordOilTemp) {
+            double c = realAdapter.readFordEngineOilTempC();
+            PidCatalog.Pid oil = PidCatalog.get(PidCatalog.ENGINE_OIL_TEMP);
+            if (!Double.isNaN(c)) text.append(oil.label()).append(": ").append(oil.formatValue(c * 9.0 / 5.0 + 32.0)).append('\n');
+        }
+        r.readings = text.toString().trim();
+        r.storedCodes = readCodes(DTCReader.Mode.STORED);
+        r.pendingCodes = readCodes(DTCReader.Mode.PENDING);
+        r.id = db.koeoReportDao().insert(r);
+        koeo = r;
+        crankStart = 0;
+        AppLog.i(this, TAG, "Key-on check:\n" + r.summary());
+    }
+
+    /** Comma-separated codes, "" for none, null when the request itself got no reply. */
+    private String readCodes(DTCReader.Mode mode) throws IOException {
+        String raw = realAdapter.requestTroubleCodes(mode);
+        if (raw.trim().isEmpty() || !raw.contains(">")) return null; // timed out
+        return android.text.TextUtils.join(",", DTCReader.parseCodes(raw, mode));
+    }
+
+    /** Saves the open KOEO report as it stands and closes it. */
+    private void finishKoeo() {
+        if (koeo == null) return;
+        db.koeoReportDao().update(koeo);
+        String summary = koeo.summary();
+        AppLog.i(this, TAG, "Key cycle result: " + summary.substring(summary.lastIndexOf("Crank:")));
+        koeo = null;
+        crankStart = 0;
+    }
+
+    private void queueKoeoCheck() {
+        LiveReadings.testRunning = true;
+        LiveReadings.testReport = "Checking…";
+        try {
+            ioExecutor.execute(this::runKoeoCheck);
+        } catch (RejectedExecutionException e) {
+            endTestEarly("✗ Tracking is shutting down — try again.");
+        }
+    }
+
+    /** On-demand KOEO snapshot from the Diagnostics tab. Needs key ON, engine off. */
+    private void runKoeoCheck() {
+        StringBuilder r = new StringBuilder();
+        try {
+            if (!ensureConnected()) {
+                r.append("✗ Can't reach the adapter (").append(lastConnectError)
+                        .append("). Turn the key to ON and try again.");
+                return;
+            }
+            if (!ensureTruckAnswering()) {
+                r.append("✗ Truck computer not answering. Turn the key to ON (engine off) and try again.");
+                return;
+            }
+            PidCatalog.Pid rpmDef = PidCatalog.get(PidCatalog.RPM);
+            double rpm = supportedPids.contains(PidCatalog.RPM)
+                    ? rpmDef.decode(realAdapter.readPid(PidCatalog.RPM)) : Double.NaN;
+            if (rpm > 0) {
+                r.append("✗ Engine is running. Shut it off, leave the key ON, and run the check again.");
+                return;
+            }
+            koeoDue = false;
+            captureKoeo(System.currentTimeMillis());
+            r.append(koeo.summary()).append("\n\nCrank whenever you're ready — the start is timed and saved.");
+        } catch (IOException | RuntimeException e) {
+            r.append("✗ Adapter stopped answering: ").append(e.getMessage());
+            handleLinkLoss();
+        } finally {
+            publishTest(r, false);
+        }
     }
 
     /** A Scan or Clear tap while the truck isn't answering gets told so instead of waiting silently. */
@@ -306,10 +800,6 @@ public class TrackingService extends Service {
      */
     private boolean handleSystemsScan() throws IOException {
         if (!SystemsScan.take()) return false;
-        if (!useRealAdapter) {
-            SystemsScan.message = "Pair your OBD adapter on the Dashboard tab. The systems scan only reads the real truck.";
-            return false;
-        }
         Double speed = LiveReadings.values.get(PidCatalog.SPEED);
         if (speed != null && speed > 1) {
             SystemsScan.message = "Park the truck first. Trip recording pauses while the scan runs.";
@@ -344,17 +834,12 @@ public class TrackingService extends Service {
         return true;
     }
 
-    /** Runs a scan or clear the Codes tab asked for, or the automatic scan after connecting. */
+    /** Runs a scan or clear the Checks tab asked for, or the automatic scan after connecting. */
     private void handleCodeRequest() throws IOException {
         DiagnosticCodes.Request request = DiagnosticCodes.take();
         if (request == DiagnosticCodes.Request.NONE && autoScanPending) request = DiagnosticCodes.Request.SCAN;
         autoScanPending = false;
         if (request == DiagnosticCodes.Request.NONE) return;
-        if (!useRealAdapter) {
-            // Codes only ever come from the truck; the simulator never invents them.
-            DiagnosticCodes.message = "Pair your OBD adapter on the Dashboard tab to read codes.";
-            return;
-        }
 
         DiagnosticCodes.busy = true;
         try {
@@ -404,10 +889,13 @@ public class TrackingService extends Service {
     }
 
     private void pollOnce() throws IOException {
+        if (crankLog != null) {
+            pollCranking();
+            return;
+        }
         Set<Integer> want = new LinkedHashSet<>(AppSettings.getDashboardPids(this));
         want.add(PidCatalog.RPM);
         want.add(PidCatalog.SPEED);
-        want.add(PidCatalog.COOLANT);
         want.add(PidCatalog.MAF);
         want.add(PidCatalog.FUEL_RATE);
         want.add(PidCatalog.ENGINE_OIL_TEMP);
@@ -415,8 +903,8 @@ public class TrackingService extends Service {
         for (int id : want) {
             PidCatalog.Pid def = PidCatalog.get(id);
             if (def == null || def.computed) continue;
-            if (useRealAdapter && !supportedPids.contains(id)) continue;
-            int[] data = useRealAdapter ? realAdapter.readPid(id) : simulator.readPid(id);
+            if (!supportedPids.contains(id)) continue;
+            int[] data = realAdapter.readPid(id);
             double value = def.decode(data);
             if (Double.isNaN(value)) {
                 LiveReadings.values.remove(id);
@@ -424,9 +912,14 @@ public class TrackingService extends Service {
                 LiveReadings.values.put(id, value);
             }
         }
-        long nowMs = System.currentTimeMillis();
-        if (useRealAdapter && fordOilTemp && nowMs - lastFordOilReadMs >= FORD_OIL_TEMP_INTERVAL_MS) {
-            lastFordOilReadMs = nowMs;
+        long now = System.currentTimeMillis();
+        if (!fordOilTemp && pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)
+                && now - lastOilProbe >= OIL_PROBE_RETRY_MS) {
+            probeFordOilTemp();
+            if (fordOilTemp) AppLog.i(this, TAG, "Ford oil temp (22 1310) is answering now");
+        }
+        if (fordOilTemp && now - lastOilRead >= OIL_READ_INTERVAL_MS) {
+            lastOilRead = now;
             double oilC = realAdapter.readFordEngineOilTempC();
             if (Double.isNaN(oilC)) {
                 LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
@@ -435,14 +928,46 @@ public class TrackingService extends Service {
             }
         }
 
-        long now = System.currentTimeMillis();
+        if (pwmBus && (want.contains(PidCatalog.FORD_ICP) || want.contains(PidCatalog.FORD_IPR))
+                && now - lastIcpRead >= ICP_READ_INTERVAL_MS) {
+            lastIcpRead = now;
+            double[] icpIpr = realAdapter.readFordIcpIpr();
+            putOrRemove(PidCatalog.FORD_ICP, icpIpr[0]);
+            putOrRemove(PidCatalog.FORD_IPR, icpIpr[1]);
+        }
+
+        if (pwmBus && now - lastFordExtraRead >= FORD_EXTRA_READ_INTERVAL_MS) {
+            List<PidCatalog.Pid> extras = new ArrayList<>();
+            for (int id : want) {
+                PidCatalog.Pid def = PidCatalog.get(id);
+                if (def != null && def.fordCode != null) extras.add(def);
+            }
+            if (!extras.isEmpty()) {
+                lastFordExtraRead = now;
+                String[] codes = new String[extras.size()];
+                for (int i = 0; i < codes.length; i++) codes[i] = extras.get(i).fordCode;
+                int[][] raw = realAdapter.readFordRaw(codes);
+                for (int i = 0; i < codes.length; i++) {
+                    putOrRemove(extras.get(i).id, extras.get(i).decode(raw[i]));
+                }
+            }
+        }
+
+        lastConnectedTimestamp = now;
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
-        boolean engineRunning = useRealAdapter ? (rpm != null && rpm > 0) : true;
+        Double obdSpeed = LiveReadings.values.get(PidCatalog.SPEED);
+        // One dropped RPM answer must not pause the trip while the truck is plainly moving.
+        boolean engineRunning = (rpm != null && rpm > 0) || (obdSpeed != null && obdSpeed > 0);
+        trackKeyOnAndCrank(now, rpm, engineRunning);
+        stallLog.add(now, LiveReadings.values);
+        onEngineEvents(engineWatch.update(now, rpm), now, rpm);
+        if (crankLog != null) return; // cranking: the next ticks read only what the crank check needs
 
         if (!engineRunning) {
             LiveReadings.engineRunning = false;
             LiveReadings.status = "Truck connected — engine off";
             lastTickTimestamp = now;
+            gpsGapMiles.reset();
             if (engineOffSince == 0) engineOffSince = now;
             if (activeSession != null && now - engineOffSince > END_TRIP_AFTER_ENGINE_OFF_MS) {
                 endSession(now);
@@ -452,17 +977,25 @@ public class TrackingService extends Service {
         }
         engineOffSince = 0;
         LiveReadings.engineRunning = true;
-        if (useRealAdapter) LiveReadings.status = "Engine running";
+        LiveReadings.status = "Engine running";
 
-        double dtSeconds = (now - lastTickTimestamp) / 1000.0;
+        double rawDtSeconds = (now - lastTickTimestamp) / 1000.0;
         lastTickTimestamp = now;
-        if (dtSeconds <= 0 || dtSeconds > MAX_TICK_SECONDS) dtSeconds = 0;
+        boolean gap = rawDtSeconds > MAX_TICK_SECONDS;
+        double dtSeconds = (rawDtSeconds <= 0 || gap) ? 0 : rawDtSeconds;
+        double gapGpsMiles = gpsGapMiles.sumThenReset();
 
         // Distance = speed x engine-on time, the same integration MPG uses.
-        Double obdSpeed = LiveReadings.values.get(PidCatalog.SPEED);
         double speedMph = obdSpeed != null ? obdSpeed : lastSpeedMph;
         double distanceDeltaMiles = speedMph * (dtSeconds / 3600.0);
         double engineHoursDelta = dtSeconds / 3600.0;
+        if (gap && gapGpsMiles > 0) {
+            // The OBD link dropped mid-drive (reconnect, stall); GPS saw the miles driven meanwhile.
+            distanceDeltaMiles = gapGpsMiles;
+            engineHoursDelta = rawDtSeconds / 3600.0;
+            AppLog.i(this, TAG, String.format(java.util.Locale.US,
+                    "Filled a %.0f s OBD gap with %.2f GPS miles", rawDtSeconds, gapGpsMiles));
+        }
 
         Double maf = LiveReadings.values.get(PidCatalog.MAF);
         Double fuelRate = LiveReadings.values.get(PidCatalog.FUEL_RATE);
@@ -473,19 +1006,16 @@ public class TrackingService extends Service {
         double gallonsDelta = gallonsPerHour * (dtSeconds / 3600.0);
         lastInstantMpg = (gallonsPerHour > 0.01 && speedMph > 0.5) ? speedMph / gallonsPerHour : 0;
 
-        // Oil life runs on engine oil temp (the 7.3L's real thermal signal); coolant only as fallback.
+        // Oil life runs on engine oil temp, the 7.3L's real thermal signal; no reading adds no heat penalty.
         Double oilTempF = LiveReadings.values.get(PidCatalog.ENGINE_OIL_TEMP);
-        Double engineTempF = oilTempF != null ? oilTempF : LiveReadings.values.get(PidCatalog.COOLANT);
 
         if (activeSession == null) startSession(now);
 
-        profile.odometerMiles += distanceDeltaMiles;
-        profile.milesSinceOilChange += distanceDeltaMiles;
-        profile.engineHoursSinceOilChange += engineHoursDelta;
-        profile.totalFuelGallons += gallonsDelta;
-        profile.oilLifePercent = OilLifeEngine.degrade(
-                profile.oilLifePercent, distanceDeltaMiles, profile.severeDuty,
-                rpm != null ? rpm : 0, engineTempF != null ? engineTempF : 0);
+        pendingMiles += distanceDeltaMiles;
+        pendingHours += engineHoursDelta;
+        pendingGallons += gallonsDelta;
+        pendingOilPercent += OilLifeEngine.percentUsed(distanceDeltaMiles, profile.severeDuty,
+                rpm != null ? rpm : 0, oilTempF != null ? oilTempF : 0);
 
         activeSession.distanceMiles += distanceDeltaMiles;
         activeSession.fuelGallonsUsed += gallonsDelta;
@@ -507,7 +1037,8 @@ public class TrackingService extends Service {
             LiveReadings.values.remove(PidCatalog.COMPUTED_TRIP_MPG);
         }
         LiveReadings.values.put(PidCatalog.COMPUTED_TRIP_MILES, activeSession.distanceMiles);
-        LiveReadings.values.put(PidCatalog.COMPUTED_ODOMETER, profile.odometerMiles);
+        LiveReadings.values.put(PidCatalog.COMPUTED_TRIP_TIME, (now - activeSession.startTimestamp) / 1000.0);
+        LiveReadings.values.put(PidCatalog.COMPUTED_ODOMETER, profile.odometerMiles + pendingMiles);
 
         if (now - lastPersistTimestamp >= PERSIST_INTERVAL_MS) {
             lastPersistTimestamp = now;
@@ -515,8 +1046,88 @@ public class TrackingService extends Service {
         }
     }
 
+    private static void putOrRemove(int id, double value) {
+        if (Double.isNaN(value)) {
+            LiveReadings.values.remove(id);
+        } else {
+            LiveReadings.values.put(id, value);
+        }
+    }
+
+    /** While the starter turns: only RPM, ICP/IPR and battery voltage, as often as the bus answers. */
+    private void pollCranking() throws IOException {
+        double rpmValue = PidCatalog.get(PidCatalog.RPM).decode(realAdapter.readPid(PidCatalog.RPM));
+        Double rpm = Double.isNaN(rpmValue) ? null : rpmValue;
+        double[] icpIpr = pwmBus ? realAdapter.readFordIcpIpr() : new double[]{Double.NaN, Double.NaN};
+        double volts = realAdapter.readVolts();
+        long now = System.currentTimeMillis();
+        crankLog.add(now, rpmValue, icpIpr[0], icpIpr[1], volts > 0 ? volts : Double.NaN);
+        if (rpm == null) {
+            LiveReadings.values.remove(PidCatalog.RPM);
+        } else {
+            LiveReadings.values.put(PidCatalog.RPM, rpm);
+        }
+        LiveReadings.status = crankLog.liveLine();
+        updateNotification(LiveReadings.status);
+        lastConnectedTimestamp = now;
+        lastTickTimestamp = now; // cranking isn't engine-on time
+        trackKeyOnAndCrank(now, rpm, rpm != null && rpm > 0); // the key cycle's crank timing keeps counting
+        onEngineEvents(engineWatch.update(now, rpm), now, rpm);
+    }
+
+    private void onEngineEvents(List<EngineWatch.Event> events, long now, Double rpm) {
+        for (EngineWatch.Event event : events) {
+            switch (event) {
+                case STALLED: {
+                    long at = engineWatch.lastStallAt();
+                    String where = saveReport("stall", at, stallLog.report(at));
+                    AppLog.i(this, TAG, "Stall: RPM fell to 0 with the key on. Report: " + where);
+                    postAlert(STALL_ALERT_ID, "Engine stalled",
+                            "RPM fell to 0 with the key on. Last minute of readings saved to " + where);
+                    break;
+                }
+                case CRANK_STARTED:
+                    crankLog = new CrankLog(now);
+                    crankLog.add(now, rpm != null ? rpm : Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+                    LiveReadings.status = crankLog.liveLine();
+                    break;
+                case STARTED:
+                case NO_START: {
+                    boolean started = event == EngineWatch.Event.STARTED;
+                    String summary = crankLog.summary(started, now);
+                    String where = saveReport("crank", crankLog.startedAt(), crankLog.report(started, now));
+                    AppLog.i(this, TAG, summary + ". Report: " + where);
+                    postAlert(CRANK_ALERT_ID, started ? "Engine started" : "No start", summary + ". Saved to " + where);
+                    crankLog = null;
+                    break;
+                }
+            }
+        }
+    }
+
+    /** Writes a report to the tablet; returns where it went, or why it didn't. */
+    private String saveReport(String kind, long at, String text) {
+        String name = kind + "_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date(at)) + ".csv";
+        try {
+            return TabletFiles.save(this, name, text);
+        } catch (IOException | RuntimeException e) {
+            AppLog.e(this, TAG, "Couldn't save " + name, e);
+            return "nowhere (" + e.getMessage() + ")";
+        }
+    }
+
+    /** Writes pending driving as deltas, then reloads the row to pick up UI edits (odometer, oil change). */
+    private void flushProfile() {
+        if (pendingMiles > 0 || pendingHours > 0 || pendingGallons > 0 || pendingOilPercent > 0) {
+            db.vehicleProfileDao().applyDrive(pendingMiles, pendingHours, pendingGallons, pendingOilPercent);
+            pendingMiles = pendingHours = pendingGallons = pendingOilPercent = 0;
+        }
+        VehicleProfile fresh = db.vehicleProfileDao().getSync();
+        if (fresh != null) profile = fresh;
+    }
+
     private void persist(long now, double speedMph, double rpm, double maf) {
-        db.vehicleProfileDao().update(profile);
+        flushProfile();
         db.sessionDao().update(activeSession);
 
         TripPoint point = new TripPoint();
@@ -540,25 +1151,43 @@ public class TrackingService extends Service {
     private void startSession(long now) {
         activeSession = new Session();
         activeSession.startTimestamp = now;
-        activeSession.startOdometerMiles = profile.odometerMiles;
+        activeSession.startOdometerMiles = profile.odometerMiles + pendingMiles;
         activeSession.id = db.sessionDao().insert(activeSession);
         distanceSincePoint = 0;
+        mainHandler.post(this::startGps);
     }
 
     private void endSession(long now) {
         activeSession.endTimestamp = now;
         db.sessionDao().update(activeSession);
-        db.vehicleProfileDao().update(profile);
+        flushProfile();
         activeSession = null;
         checkServiceAlerts();
+        mainHandler.post(this::stopGps);
     }
 
     /** Service alerts wait until the truck is parked — never a buzz mid-drive. */
     private void checkServiceAlerts() {
         try {
-            ServiceAlertPolicy.checkAndNotify(this, profile, db.maintenanceDao());
+            ServiceAlertPolicy.checkAndNotify(this, profile, db.maintenanceDao(), db.sessionDao());
         } catch (RuntimeException e) {
             AppLog.e(this, TAG, "Service alert check failed", e);
+        }
+    }
+
+    private void postAlert(int id, String title, String text) {
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ALERTS)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true);
+
+        android.app.NotificationManager manager =
+                (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(id, builder.build());
         }
     }
 
@@ -572,7 +1201,7 @@ public class TrackingService extends Service {
     }
 
     private android.app.Notification buildNotification(String text) {
-        NotificationCompat.Builder builder = NotificationUtils.trackingNotificationBuilder(this)
+        NotificationCompat.Builder builder = NotificationUtils.trackingNotificationBuilder(this, activeSession != null)
                 .setContentText(text);
         return builder.build();
     }
@@ -591,10 +1220,14 @@ public class TrackingService extends Service {
         stopped = true;
         isRunning = false;
         mainHandler.removeCallbacks(pollTask);
+        unregisterReceiver(wakeReceiver);
+        AlarmManager alarms = getSystemService(AlarmManager.class);
+        if (alarms != null) alarms.cancel(idleCheckIntent);
         gpsTracker.stop();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         LiveReadings.clearValues();
-        LiveReadings.status = "Tracking is off";
+        LiveReadings.supported = Collections.emptySet();
+        LiveReadings.status = stopReason != null ? stopReason : LiveReadings.IDLE_STATUS;
         try {
             ioExecutor.execute(() -> {
                 if (realAdapter != null) realAdapter.disconnect();
@@ -603,7 +1236,8 @@ public class TrackingService extends Service {
                     activeSession.endTimestamp = System.currentTimeMillis();
                     db.sessionDao().update(activeSession);
                 }
-                if (profile != null) db.vehicleProfileDao().update(profile);
+                finishKoeo();
+                if (profile != null) flushProfile();
                 if (hadTrip) checkServiceAlerts(); // key-off drops the adapter before the engine-off timer ends the trip
             });
         } catch (RejectedExecutionException ignored) {

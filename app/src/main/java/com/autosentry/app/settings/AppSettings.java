@@ -11,18 +11,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Stores the one thing auto-tracking needs to know: which paired Bluetooth
- * device is the OBD adapter. Set once via the "Pair OBD Adapter" flow, then
- * BluetoothConnectionReceiver uses it to recognize the adapter on every
- * future connect/disconnect without any user action.
- */
+/** Persistent user and vehicle settings. Live vehicle data must come from a real adapter. */
 public final class AppSettings {
     private static final String PREFS_NAME = "autosentry_settings";
     private static final String KEY_ADAPTER_ADDRESS = "obd_adapter_address";
     private static final String KEY_ADAPTER_NAME = "obd_adapter_name";
     private static final String KEY_AUTO_TRACKING_ENABLED = "auto_tracking_enabled";
-    private static final String KEY_SIMULATOR_MODE_ENABLED = "simulator_mode_enabled";
+    // Set when the user types STOP; keeps boot/watchdog restarts off until they tap Start again.
+    private static final String KEY_TRACKING_PAUSED = "tracking_paused";
     private static final String KEY_DASHBOARD_PIDS = "dashboard_pids";
     private static final String KEY_SUPPORTED_PIDS = "supported_pids";
     private static final String KEY_TRACKING_START = "maintenance_tracking_start";
@@ -30,6 +26,11 @@ public final class AppSettings {
     private static final String KEY_LAST_CODE_SCAN = "last_code_scan";
     private static final String KEY_ALERT_STAGE_PREFIX = "service_alert_stage_";
     private static final String KEY_ALERT_TIME_PREFIX = "service_alert_time_";
+    // Set once Trip Time has been put on a saved dashboard (or the user saved their own).
+    private static final String KEY_TRIP_TIME_ADDED = "trip_time_added";
+    // Highest setup-wizard phase the user has finished (0 = none); see SetupWizardActivity.
+    private static final String KEY_SETUP_PHASE_DONE = "setup_phase_done";
+    private static final String KEY_TILE_COLUMNS = "dashboard_columns";
 
     private AppSettings() {}
 
@@ -89,10 +90,7 @@ public final class AppSettings {
     }
 
     public static void setObdAdapter(Context context, String address, String name) {
-        prefs(context).edit()
-                .putString(KEY_ADAPTER_ADDRESS, address)
-                .putString(KEY_ADAPTER_NAME, name)
-                .apply();
+        prefs(context).edit().putString(KEY_ADAPTER_ADDRESS, address).putString(KEY_ADAPTER_NAME, name).apply();
     }
 
     public static String getObdAdapterAddress(Context context) {
@@ -104,7 +102,8 @@ public final class AppSettings {
     }
 
     public static boolean hasObdAdapterConfigured(Context context) {
-        return getObdAdapterAddress(context) != null;
+        String address = getObdAdapterAddress(context);
+        return address != null && !address.trim().isEmpty();
     }
 
     public static void setAutoTrackingEnabled(Context context, boolean enabled) {
@@ -115,45 +114,72 @@ public final class AppSettings {
         return prefs(context).getBoolean(KEY_AUTO_TRACKING_ENABLED, true);
     }
 
-    public static void setSimulatorModeEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SIMULATOR_MODE_ENABLED, enabled).apply();
+    public static void setTrackingPaused(Context context, boolean paused) {
+        prefs(context).edit().putBoolean(KEY_TRACKING_PAUSED, paused).apply();
     }
 
-    public static boolean isSimulatorModeEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_SIMULATOR_MODE_ENABLED, false);
+    public static boolean isTrackingPaused(Context context) {
+        return prefs(context).getBoolean(KEY_TRACKING_PAUSED, false);
     }
 
-    /** Which readings the dashboard shows, in display order. Set from the "Edit Dashboard" screen. */
+    public static int getSetupPhaseDone(Context context) {
+        return prefs(context).getInt(KEY_SETUP_PHASE_DONE, 0);
+    }
+
+    public static void setSetupPhaseDone(Context context, int phase) {
+        prefs(context).edit().putInt(KEY_SETUP_PHASE_DONE, phase).apply();
+    }
+
     public static List<Integer> getDashboardPids(Context context) {
         String stored = prefs(context).getString(KEY_DASHBOARD_PIDS, null);
         if (stored == null) {
             List<Integer> defaults = new ArrayList<>();
+            // The first two numeric readings get the large gauges.
+            defaults.add(PidCatalog.ENGINE_OIL_TEMP);
             defaults.add(PidCatalog.RPM);
+            defaults.add(0x0B);  // boost
+            defaults.add(0x42);  // battery volts
+            defaults.add(0x0F);  // intake air temp
+            defaults.add(0x2F);  // fuel level
             defaults.add(PidCatalog.SPEED);
-            defaults.add(PidCatalog.COOLANT);
             defaults.add(PidCatalog.COMPUTED_INSTANT_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MPG);
             defaults.add(PidCatalog.COMPUTED_TRIP_MILES);
+            defaults.add(PidCatalog.COMPUTED_TRIP_TIME);
             return defaults;
         }
-        return parseIds(stored);
+        List<Integer> ids = parseIds(stored);
+        if (!prefs(context).getBoolean(KEY_TRIP_TIME_ADDED, false)) {
+            if (!ids.contains(PidCatalog.COMPUTED_TRIP_TIME)) ids.add(PidCatalog.COMPUTED_TRIP_TIME);
+            setDashboardPids(context, ids);
+        }
+        return ids;
     }
 
     public static void setDashboardPids(Context context, List<Integer> pids) {
-        prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids)).apply();
+        prefs(context).edit().putString(KEY_DASHBOARD_PIDS, joinIds(pids))
+                .putBoolean(KEY_TRIP_TIME_ADDED, true).apply();
     }
 
-    /** PIDs the truck said it answers on the last successful scan; empty if never scanned. */
+    /** Gauges per row on the dashboard: 5 on a tablet, 3 on a phone. */
+    public static int getTileColumns(Context context) {
+        int fallback = context.getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 5 : 3;
+        return Math.max(2, Math.min(7, prefs(context).getInt(KEY_TILE_COLUMNS, fallback)));
+    }
+
+    public static void setTileColumns(Context context, int columns) {
+        prefs(context).edit().putInt(KEY_TILE_COLUMNS, Math.max(2, Math.min(7, columns))).apply();
+    }
+
     public static Set<Integer> getSupportedPids(Context context) {
-        String stored = prefs(context).getString(KEY_SUPPORTED_PIDS, "");
-        return new HashSet<>(parseIds(stored));
+        return new HashSet<>(parseIds(prefs(context).getString(KEY_SUPPORTED_PIDS, "")));
     }
 
     public static void setSupportedPids(Context context, Set<Integer> pids) {
         prefs(context).edit().putString(KEY_SUPPORTED_PIDS, joinIds(new ArrayList<>(pids))).apply();
     }
 
-    /** The last trouble-code scan, so the Codes tab has something to show with the truck off. */
+    /** The last trouble-code scan, so the Checks tab has something to show with the truck off. */
     public static DiagnosticCodes.Scan getLastCodeScan(Context context) {
         return DiagnosticCodes.Scan.deserialize(prefs(context).getString(KEY_LAST_CODE_SCAN, null));
     }
@@ -166,10 +192,8 @@ public final class AppSettings {
         List<Integer> ids = new ArrayList<>();
         if (stored == null || stored.isEmpty()) return ids;
         for (String part : stored.split(",")) {
-            try {
-                ids.add(Integer.parseInt(part.trim()));
-            } catch (NumberFormatException ignored) {
-            }
+            try { ids.add(Integer.parseInt(part.trim())); }
+            catch (NumberFormatException ignored) { }
         }
         return ids;
     }

@@ -36,12 +36,14 @@ public final class OilLifeEngine {
      */
     public static double degrade(double currentPercent, double milesDelta, boolean severeDuty,
                                    double avgRpm, double avgEngineTempF) {
-        int baseIntervalMiles = severeDuty ? SEVERE_INTERVAL_MILES : NORMAL_INTERVAL_MILES;
-        double severity = severityMultiplier(avgRpm, avgEngineTempF);
-
-        double percentUsed = (milesDelta * severity / baseIntervalMiles) * 100.0;
-        double result = currentPercent - percentUsed;
+        double result = currentPercent - percentUsed(milesDelta, severeDuty, avgRpm, avgEngineTempF);
         return Math.max(0.0, Math.min(100.0, result));
+    }
+
+    /** Oil life % consumed by one tick, before clamping; TrackingService accumulates these. */
+    public static double percentUsed(double milesDelta, boolean severeDuty, double avgRpm, double avgEngineTempF) {
+        int baseIntervalMiles = severeDuty ? SEVERE_INTERVAL_MILES : NORMAL_INTERVAL_MILES;
+        return (milesDelta * severityMultiplier(avgRpm, avgEngineTempF) / baseIntervalMiles) * 100.0;
     }
 
     /** 1.0 = normal duty, up to 1.5 for hot/idling conditions beyond the already-severe baseline. */

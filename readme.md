@@ -120,8 +120,13 @@ a setup wizard, and a key-on check with crank timing on every start.
 7. **Fault codes on the Checks tab.** Built, not yet tested on the truck:
    stored and pending codes read at every connect, a clear-codes button
    (key on, engine off only), and 206 7.3L codes, each with its severity
-   and what to check shown right under it. The Truck Systems scan
-   (Checks tab) reports every module and PID this truck answers.
+   and what to check shown right under it. A read that gets no real
+   answer is retried, up to 3 tries per mode, and if it still fails the
+   tab says "Couldn't read trouble codes" with the reason and a Try Again
+   button, never "no codes". Clear Codes only works after a read that
+   succeeded, and the codes from just before each clear are kept on the
+   tab. The Truck Systems scan (Checks tab) reports every module and PID
+   this truck answers.
 8. **Deals tied to each service alert.** The right parts for the job
    that's coming due.
 9. **Resale report export.** A PDF of the verified service history.
@@ -148,7 +153,7 @@ Landing page: https://amresthtx.github.io/autosentry2/ (source in `site/`, publi
 - **Key-on check (KOEO)** — every key cycle, before cranking, AutoSentry snapshots battery voltage at the OBD port, every standard reading the truck answers (plus the 7.3L's Ford oil temp), and stored and pending trouble codes. It then times the crank (RPM above 0 but under 500), counts tries, and records the lowest cranking voltage and whether the engine started. Reports are on the Checks tab; **Run Key-On Check** takes one on demand with the key ON and the engine off. Ford's commanded self-tests (on-demand KOEO self-test, injector buzz test, glow plug test) are not sent: their 7.3L request bytes aren't verified here, and the buzz test energizes injectors.
 - **Pick your readings** — the list button in the Dashboard toolbar lists every supported reading (about 35, including coolant, load, EGR, torque, injection timing and, on the 7.3L, Ford ICP and IPR); ones the truck hasn't confirmed are labeled instead of hidden. The dashboard has a left menu, a light toolbar, and a grid of dial tiles with a white needle, round-number scale, colored value and the name underneath (the colors are per gauge and don't mean anything; an out-of-range gauge gets an amber or red border). The zoom buttons change how many tiles fit across, and holding a tile moves or removes it.
 - **Ford PID discovery** — `tools/obd_probe.py --forscan <file>` tries every 4-digit Mode 22 PID found in a FORScan export, and `--sweep 1000 1500` brute-forces a hex range; answering PIDs are logged with raw bytes so scaling can be matched against FORScan's on-screen value.
-- **Trouble codes** — stored and pending codes and the check engine light are read every time the truck starts answering, and on demand from the Checks tab. Each code shows its 7.3L meaning, a severity and what to check. **Clear Codes** (Mode 04) only runs key on, engine off.
+- **Trouble codes** — stored and pending codes and the check engine light are read every time the truck starts answering (by the key-on check when the engine is off), and on demand from the Checks tab. Each code shows its 7.3L meaning, a severity and what to check. A read only says "no codes" when the truck really answered that way: each reply is sorted into codes, none, NO DATA, refused (7F) or failed (timeout, adapter or bus error, garbage), and NO DATA and failures are retried up to 3 times, 500 ms apart. NO DATA counts as none only when the same read proved the PCM is answering: Mode 01 PID 01 reporting zero stored codes and the light off for stored codes, or any real PID 01 or Mode 03 reply for pending. Fewer codes than PID 01's count is an incomplete read. A read that still fails shows "Couldn't read trouble codes after 3 tries" with the reason and a Try Again button, is saved that way across restarts, and is recorded as failed on the key-on report. Retries check RPM between tries, so a crank is never held up: if the starter turns mid-read, the read stops, is recorded as "the engine started before codes could be read", and codes are read again once the engine is running. **Clear Codes** (Mode 04) only runs key on, engine off, after a read that succeeded; it reads the codes once more first and keeps that list (and the light state) on the Checks tab, so a clear never loses the evidence.
 - **Truck Systems scan** — Checks > Scan Truck Systems reports the adapter, the bus, every module that answers, every standard reading with its live value, and a Mode 22 sweep of the PCM, as a text report you can share. It only reads.
 
 ## Setup wizard

@@ -119,6 +119,7 @@ public class MainActivity extends AppCompatActivity {
     private String lastServiceListSignature = "";
     private String lastCodesSignature = "";
     private DiagnosticCodes.Scan savedCodeScan;
+    private List<DiagnosticCodes.Scan> savedBeforeClear = Collections.emptyList();
     private ImageButton buttonEditDashboard, buttonToggleTracking;
     private Button buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
@@ -222,6 +223,7 @@ public class MainActivity extends AppCompatActivity {
 
         rebuildTiles();
         savedCodeScan = AppSettings.getLastCodeScan(this);
+        savedBeforeClear = AppSettings.getCodesBeforeClear(this);
         showTab(getIntent().getBooleanExtra(EXTRA_OPEN_SERVICE_TAB, false) ? TAB_HISTORY : TAB_DASHBOARD);
 
         ioExecutor.execute(() -> {
@@ -1052,7 +1054,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void confirmClearCodes() {
-        if (!TrackingService.isRunning) {
+        DiagnosticCodes.Scan scan = DiagnosticCodes.lastScan != null ? DiagnosticCodes.lastScan : savedCodeScan;
+        if (!TrackingService.isRunning || scan == null || !scan.succeeded()) {
             Toast.makeText(this, "Turn the key on and tap Scan for Codes first", Toast.LENGTH_LONG).show();
             return;
         }
@@ -1068,7 +1071,8 @@ public class MainActivity extends AppCompatActivity {
                 .setTitle("Clear trouble codes?")
                 .setMessage("This erases the codes, the freeze-frame data saved with them, and resets the readiness "
                         + "monitors (P1000 shows until the truck has been driven enough). If the problem isn't fixed, "
-                        + "the codes come back. Write them down first if a mechanic will need them.")
+                        + "the codes come back. AutoSentry reads the codes once more right before clearing and keeps "
+                        + "that list on this tab; the freeze-frame data is not saved.")
                 .setPositiveButton("Clear Codes", (d, w) -> {
                     DiagnosticCodes.request(DiagnosticCodes.Request.CLEAR);
                     lastCodesSignature = "";
@@ -1080,26 +1084,30 @@ public class MainActivity extends AppCompatActivity {
     /** Rebuilt only when something on it changed, like the service list. */
     private void updateCodesTab() {
         DiagnosticCodes.Scan scan = DiagnosticCodes.lastScan != null ? DiagnosticCodes.lastScan : savedCodeScan;
+        List<DiagnosticCodes.Scan> beforeClear = DiagnosticCodes.beforeClear != null
+                ? DiagnosticCodes.beforeClear : savedBeforeClear;
         boolean busy = DiagnosticCodes.busy;
         String message = DiagnosticCodes.message;
         boolean running = TrackingService.isRunning;
         boolean paired = AppSettings.hasObdAdapterConfigured(this);
-        String signature = (scan == null ? "-" : scan.serialize()) + '|' + busy + '|' + message + '|' + running + '|' + paired;
-        if (signature.equals(lastCodesSignature)) return;
-        lastCodesSignature = signature;
+        StringBuilder signature = new StringBuilder(scan == null ? "-" : scan.serialize())
+                .append('|').append(busy).append('|').append(message).append('|').append(running).append('|').append(paired);
+        for (DiagnosticCodes.Scan s : beforeClear) signature.append('|').append(s.serialize());
+        if (signature.toString().equals(lastCodesSignature)) return;
+        lastCodesSignature = signature.toString();
 
         if (scan == null) {
             textMilStatus.setText("Not scanned yet");
             textMilStatus.setTextColor(getColor(R.color.cyan_display));
         } else {
-            String count = scan.codes.isEmpty() ? "no codes"
-                    : scan.codes.size() + (scan.codes.size() == 1 ? " code" : " codes");
+            String count = scan.countText();
             if (scan.milOn == null) {
                 textMilStatus.setText("Not reported · " + count);
                 textMilStatus.setTextColor(getColor(R.color.cyan_display));
             } else {
                 textMilStatus.setText((scan.milOn ? "ON" : "OFF") + " · " + count);
-                textMilStatus.setTextColor(scan.milOn ? cCrit : cOk);
+                // Light off is only good news when the codes were read too.
+                textMilStatus.setTextColor(scan.milOn ? cCrit : (scan.complete() ? cOk : cWarn));
             }
         }
 
@@ -1118,19 +1126,74 @@ public class MainActivity extends AppCompatActivity {
         textCodesScanInfo.setText(info);
 
         buttonScanCodes.setEnabled(!busy);
-        buttonClearCodes.setEnabled(!busy && scan != null && (!scan.codes.isEmpty() || Boolean.TRUE.equals(scan.milOn)));
+        // Clearing needs a read that worked: the codes about to be erased must be known first.
+        buttonClearCodes.setEnabled(!busy && scan != null && scan.succeeded()
+                && (!scan.codes.isEmpty() || Boolean.TRUE.equals(scan.milOn)));
 
         layoutCodesList.removeAllViews();
-        if (scan == null) return;
-        if (scan.codes.isEmpty()) {
-            TextView none = new TextView(this);
-            none.setText("No stored or pending codes.");
-            none.setTextSize(16);
-            none.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
-            layoutCodesList.addView(none);
-            return;
+        if (scan != null) {
+            String problem = scan.problemHeadline();
+            boolean failed = scan.stored.outcome == DTCReader.Outcome.FAILED
+                    || scan.pending.outcome == DTCReader.Outcome.FAILED;
+            if (problem != null) addReadProblem(problem, scan.problemDetail(), failed, busy);
+            if (scan.complete() && scan.codes.isEmpty()) {
+                addCodesNote("No stored or pending codes.");
+            } else {
+                if (scan.stored.outcome == DTCReader.Outcome.NONE) addCodesNote("No stored codes.");
+                if (scan.pending.outcome == DTCReader.Outcome.NONE) addCodesNote("No pending codes.");
+            }
+            for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
         }
-        for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
+        for (DiagnosticCodes.Scan before : beforeClear) addCodesBeforeClear(before);
+    }
+
+    /** A read that fell short says so plainly, with why and a way to try again. Never "no codes". */
+    private void addReadProblem(String headline, String detail, boolean failed, boolean busy) {
+        float density = getResources().getDisplayMetrics().density;
+        TextView title = new TextView(this);
+        title.setText(headline);
+        title.setTextSize(16);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextColor(cWarn);
+        title.setPadding(0, Math.round(8 * density), 0, 0);
+        layoutCodesList.addView(title);
+        if (detail != null) addCodeDetail(layoutCodesList, detail);
+        if (failed) addCodeDetail(layoutCodesList, "This doesn't mean the truck has no codes. Leave the key on and try again.");
+
+        Button retry = new Button(this);
+        retry.setText("Try Again");
+        retry.setEnabled(!busy);
+        retry.setOnClickListener(v -> requestCodeScan());
+        layoutCodesList.addView(retry, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void addCodesNote(String text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextSize(16);
+        note.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
+        layoutCodesList.addView(note);
+    }
+
+    /** What the truck had just before a clear, kept so the clear never loses it. */
+    private void addCodesBeforeClear(DiagnosticCodes.Scan before) {
+        float density = getResources().getDisplayMetrics().density;
+        TextView title = new TextView(this);
+        title.setText("Before clearing " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                .format(new Date(before.timestamp)));
+        title.setTextSize(14);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, Math.round(16 * density), 0, 0);
+        layoutCodesList.addView(title);
+        StringBuilder sb = new StringBuilder("Check engine light ")
+                .append(before.milOn == null ? "not reported" : (before.milOn ? "ON" : "OFF"));
+        if (before.codes.isEmpty()) sb.append(" · no codes");
+        for (DTCReader.DtcRecord record : before.codes) {
+            sb.append("\n").append(record.code).append("  ").append(record.title).append(" (").append(record.mode.label).append(')');
+        }
+        if (before.pending.outcome == DTCReader.Outcome.REFUSED) sb.append("\nPending codes: not available from this truck");
+        addCodeDetail(layoutCodesList, sb.toString());
     }
 
     /** One code with everything it means written out underneath; nothing to tap through. */

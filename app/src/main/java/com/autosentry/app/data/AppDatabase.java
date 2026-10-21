@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         MaintenanceAttachment.class,
         KoeoReport.class
     },
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 public abstract class AppDatabase extends RoomDatabase {
@@ -78,6 +78,25 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Adds why a key-on code read failed. Rows from before this read codes once and
+     * couldn't tell "no codes" from no answer, so their "none" is marked unconfirmed.
+     */
+    static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE koeo_reports ADD COLUMN storedCodesProblem TEXT");
+            db.execSQL("ALTER TABLE koeo_reports ADD COLUMN pendingCodesProblem TEXT");
+            db.execSQL("UPDATE koeo_reports SET storedCodesProblem = ? WHERE storedCodes = ''",
+                    new Object[]{UNCONFIRMED_NONE});
+            db.execSQL("UPDATE koeo_reports SET pendingCodesProblem = ? WHERE pendingCodes = ''",
+                    new Object[]{UNCONFIRMED_NONE});
+        }
+    };
+
+    static final String UNCONFIRMED_NONE =
+            "none, not confirmed: read once by an older version that couldn't tell no codes from no answer";
+
     private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
         try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {
             int nameIndex = cursor.getColumnIndex("name");
@@ -98,7 +117,7 @@ public abstract class AppDatabase extends RoomDatabase {
                             context.getApplicationContext(),
                             AppDatabase.class,
                             "autosentry.db"
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build();
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
                 }
             }
         }

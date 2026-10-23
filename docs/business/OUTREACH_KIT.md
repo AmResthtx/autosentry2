@@ -19,6 +19,7 @@ Check each sub's self-promotion rules first. r/Powerstroke, r/Diesel and r/f250 
 > - It catches the crank: voltage, crank time and tries, every start
 > - Trouble codes with what each one means on a 7.3 specifically
 > - A service log with receipts and photos, so you can prove the work when you sell
+> - When the truck doesn't answer, it says so instead of guessing
 > - No account, no cloud. The app doesn't even have internet permission.
 >
 > What's rough: [be honest: MPG isn't working on the 7.3 yet, codes are still being verified on the truck, only OBDLink MX+ and LX are supported].
@@ -45,7 +46,7 @@ Check each sub's self-promotion rules first. r/Powerstroke, r/Diesel and r/f250 
 > - **$250 for 6 months:** first slot under [job], your discount code, plus a mention on the site and in the beta thread.
 > - **No upfront cost:** same slot, your discount code, and 10% of what the code sells, which you report monthly.
 >
-> The ground rules, because 7.3 owners forgive nothing: it's always labeled "Sponsored", it's never shown next to a trouble code, it never changes when a job comes due, and I only take a partner whose part I'd run on my own truck.
+> The ground rules: owners trust AutoSentry because it tells them the truth about their truck, so that part isn't for sale. Your placement is always labeled "Sponsored", it's never shown next to a trouble code or a reading, and it can't change when a job comes due. You stand behind your parts; the app sticks to telling the owner what the truck needs and when.
 >
 > We're in beta with [N] trucks and opening to the public [month]. Early partners get first pick of jobs and this price.
 >

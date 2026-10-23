@@ -1,6 +1,19 @@
 # AutoSentry: business plan (v1, 2026-10-22)
 
-The goal is first revenue in 30 days without breaking the promise that built the product: the core app stays free, the data stays on the phone, and no link ever sits next to a trouble code.
+The goal is first revenue in 30 days without breaking the promise that built the product: what AutoSentry tells an owner about their truck is never for sale.
+
+## Where the trust is
+
+**AutoSentry is the observer of the truck, not the supplier of parts.** Owners trust it because what it says about the truck is true: a measured reading, a code the truck actually reported, the miles and engine hours it recorded itself, a service due on the real schedule, and "couldn't read" when it couldn't read. That's what's worth protecting. The deal next to a due service matters far less, because the seller, not us, stands behind the part.
+
+So the rule isn't "only recommend good parts". It's **keep money out of the observation**:
+
+- **Never for sale:** readings, trouble codes and their severity, intervals, due dates, alerts, and the Resale Report. No partner, price or commission can change any of them.
+- **Kept apart:** offers live only on the Deals tab and only under scheduled maintenance, never next to a trouble code or a reading. The tab says up front that offers come from sellers.
+- **Labeled:** every paid placement says "Sponsored" and every commission link says "Affiliate link".
+- **Facts, not endorsements:** when the app names a part, it's fitment (Ford's own part number for the job) or compatibility (the adapters AutoSentry is tested with), never a product review.
+
+This is also why the Resale Report is worth paying for. Its value is that the observer recorded it, not the owner.
 
 Builds on `readme.md` (Business model), `docs/PRODUCT_ANSWERS_DRAFT.md` (Q22–24) and `docs/PROMO_PLAN.md`. Changes one call from Q24: we start taking money now, before the data can prove demand to suppliers. The sponsor offer below is priced for that (cheap, refundable, labeled).
 
@@ -55,7 +68,7 @@ The Deals tab shows the parts for a job once it reaches 80% of its interval, bef
 - **Offer A, flat:** $250 for 6 months. They get first slot under one job (say, fuel filter), labeled "Sponsored", with their discount code, plus a mention on the landing page and in the beta thread.
 - **Offer B, performance:** free placement. They give owners a code, and we take 10% of what the code sells, reported monthly by the vendor. Lower trust needed from the vendor; slower for us.
 - **Ask for A, fall back to B.** Either one is a live partner by the public launch.
-- **Rules (non-negotiable, in the pitch):** one partner per job; always labeled; never on a trouble code; the partner can't change intervals or due dates; we only take a partner whose part we'd recommend anyway.
+- **Rules (non-negotiable, in the pitch):** one partner per job; always labeled; never on a trouble code; the partner can't change anything the app reports about a truck (readings, codes, intervals, due dates, alerts); and the partner stands behind its own parts. We're not vouching for the part, so we don't pick partners by brand. We do drop a partner that misrepresents fitment or that owners report as dishonest.
 - **Upside:** 3–5 partners × $250 = **$750–1,250**.
 
 Adding a signed partner is one line in `app/src/main/java/com/autosentry/app/business/BusinessConfig.java` (`SPONSORED`).

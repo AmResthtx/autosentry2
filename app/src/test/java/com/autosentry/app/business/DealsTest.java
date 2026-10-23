@@ -56,7 +56,7 @@ public class DealsTest {
     }
 
     @Test
-    public void knownGoodPartNumberComesBeforeGenericSearch() {
+    public void fordPartNumberComesBeforeGenericSearch() {
         List<PartOffer> offers = DealsCatalog.offersFor(ServiceItemType.FUEL_FILTER);
         assertEquals("Motorcraft FD-4596 fuel filter", offers.get(0).title);
     }
@@ -90,6 +90,13 @@ public class DealsTest {
         assertEquals("15W-40 heavy-duty diesel oil 1999-2003 7.3L Powerstroke",
                 DealsCatalog.searchQuery("15W-40 heavy-duty diesel oil (about 15 qt with filter)"));
         assertEquals("Grease gun", DealsCatalog.searchQuery("Grease gun"));
+    }
+
+    @Test
+    public void dealsIntroSeparatesTheObserverFromTheSeller() {
+        String intro = BusinessConfig.dealsIntro();
+        assertTrue(intro.contains("sellers"));
+        assertTrue(intro.contains("no seller can change that"));
     }
 
     @Test

@@ -1072,6 +1072,7 @@ public class MainActivity extends AppCompatActivity {
         lastDealsSignature = signature.toString();
         layoutDealsList.removeAllViews();
 
+        addDealsNote(BusinessConfig.dealsIntro());
         if (BusinessConfig.anyPaidLinks()) addDealsNote(BusinessConfig.disclosure());
 
         if (groups.isEmpty()) {

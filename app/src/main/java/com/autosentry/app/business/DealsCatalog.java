@@ -14,13 +14,17 @@ import java.util.Locale;
  * The app itself never goes online (no INTERNET permission); Android hands the
  * link to the browser.
  *
- * Order per job: signed sponsors, then known-good part numbers, then a search
+ * Order per job: signed sponsors, then Ford's own part numbers, then a search
  * for each part ServiceInterval lists for the job.
+ *
+ * AutoSentry is the observer, not the supplier: it says which job is due and
+ * which part fits. It doesn't vouch for a seller or a brand; sellers stand
+ * behind their own parts.
  */
 public final class DealsCatalog {
     private DealsCatalog() {}
 
-    /** Part numbers we'd stand behind in a forum thread. Add one only when it's certain for 1999–2003 7.3L. */
+    /** Ford's Motorcraft number for the job: fitment data, not an endorsement. Add one only when it's certain for 1999–2003 7.3L. */
     private static final Object[][] PICKS = {
             {ServiceItemType.OIL_FILTER, "Motorcraft FL-1995 oil filter", "Motorcraft FL1995"},
             {ServiceItemType.FUEL_FILTER, "Motorcraft FD-4596 fuel filter", "Motorcraft FD4596"},
@@ -42,7 +46,7 @@ public final class DealsCatalog {
         }
         for (Object[] pick : PICKS) {
             if (pick[0] == type) {
-                offers.add(amazon(type, (String) pick[1], (String) pick[2], "Fits 1999–2003 7.3L", tag));
+                offers.add(amazon(type, (String) pick[1], (String) pick[2], "Ford part number for 1999–2003 7.3L", tag));
             }
         }
         for (String part : ServiceInterval.of(type).parts) {
@@ -51,14 +55,14 @@ public final class DealsCatalog {
         return offers;
     }
 
-    /** The adapters the app is built and tested for. Every new owner needs one. */
+    /** The adapters AutoSentry is tested with. A compatibility fact, not a product review. */
     public static List<PartOffer> adapters() {
         String tag = BusinessConfig.AMAZON_ASSOCIATES_TAG;
         List<PartOffer> offers = new ArrayList<>();
         offers.add(amazon(null, "OBDLink MX+", "OBDLink MX+",
-                "Recommended. Classic Bluetooth and handles the 7.3L's J1850 PWM.", tag));
+                "Tested with AutoSentry. Classic Bluetooth and handles the 7.3L's J1850 PWM.", tag));
         offers.add(amazon(null, "OBDLink LX", "OBDLink LX Bluetooth",
-                "Supported. Get the Bluetooth model; the CX is Bluetooth LE only and won't connect.", tag));
+                "Tested with AutoSentry. Get the Bluetooth model; the CX is Bluetooth LE only and won't connect.", tag));
         return offers;
     }
 

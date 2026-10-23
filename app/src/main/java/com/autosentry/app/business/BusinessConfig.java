@@ -4,10 +4,13 @@ package com.autosentry.app.business;
  * Every money setting in one place. An empty value turns that feature off
  * cleanly: links still work, they just earn nothing and carry no label.
  *
- * Trust rules (docs/business/BUSINESS_PLAN.md):
+ * Where trust lives (docs/business/BUSINESS_PLAN.md): in what the app says
+ * about the truck. AutoSentry is the observer, not the supplier, so money is
+ * walled off from everything it observes:
+ *  - Readings, codes, severity, intervals and due dates are never touched by an offer.
  *  - Offers attach to scheduled maintenance only, never to trouble codes.
- *  - Every paid placement is labeled "Sponsored"; every commission link "Affiliate link".
- *  - A sponsor never changes which jobs come due or when.
+ *  - Sellers stand behind their own parts. Every paid placement is labeled
+ *    "Sponsored"; every commission link "Affiliate link".
  */
 public final class BusinessConfig {
     private BusinessConfig() {}
@@ -34,11 +37,17 @@ public final class BusinessConfig {
         return !AMAZON_ASSOCIATES_TAG.isEmpty() || SPONSORED.length > 0;
     }
 
-    /** Shown at the top of the Deals tab whenever a link can earn money. Amazon requires its sentence as written. */
+    /** Always first on the Deals tab: keeps what the app observes apart from what sellers offer. */
+    public static String dealsIntro() {
+        return "Parts for the services your truck has coming due. These come from sellers, who stand behind "
+                + "their own parts. AutoSentry's job is telling you what your truck needs and when, "
+                + "and no seller can change that.";
+    }
+
+    /** Shown under the intro whenever a link can earn money. Amazon requires its sentence as written. */
     public static String disclosure() {
         StringBuilder sb = new StringBuilder(
-                "Some links earn AutoSentry a commission or are paid placements, and each one is labeled. "
-                        + "That never changes which services come due or when.");
+                "Links labeled Sponsored or Affiliate link earn AutoSentry money.");
         if (!AMAZON_ASSOCIATES_TAG.isEmpty()) {
             sb.append(" As an Amazon Associate AutoSentry earns from qualifying purchases.");
         }

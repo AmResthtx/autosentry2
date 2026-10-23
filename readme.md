@@ -63,9 +63,11 @@ sell the truck.
   impulse buy.
 - **Affiliate commission** on parts bought through the app.
 - **Resale report:** a one-time purchase when the owner sells.
-- **Trust rule:** only recommend quality parts at a better price, and label
-  sponsored placements. One bad part recommendation costs the community's
-  trust for good.
+- **Trust rule:** the trust is in what the app says about the truck.
+  AutoSentry is the observer, not the supplier. Readings, codes, due dates,
+  alerts and the resale report are never for sale. Offers stay on the Deals
+  tab under scheduled maintenance, are labeled, and come from sellers who
+  stand behind their own parts.
 
 ## Why the 7.3L first
 

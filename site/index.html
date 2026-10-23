@@ -156,6 +156,51 @@
   .cta-band h3 { font-size: 26px; }
   .cta-band p { color: var(--muted); margin-top: 4px; }
 
+  /* Pricing */
+  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 44px; align-items: stretch; }
+  @media (max-width: 900px) { .plans { grid-template-columns: 1fr; } }
+  .plan { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 26px 24px; }
+  .plan.featured { border-color: var(--ok); background: linear-gradient(160deg, #263127, var(--surface) 55%); }
+  .plan .level { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+  .plan h3 { font-size: 24px; }
+  .plan .for { color: var(--teal); font-size: 15px; margin-top: 4px; }
+  .plan .plus { color: var(--text); font-weight: 600; font-size: 15px; margin-bottom: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .plan .foot { color: var(--muted); font-size: 13px; margin: -12px 0 18px; }
+  .plan .price { font: 600 40px var(--display); margin: 14px 0 2px; }
+  .plan .price small { font: 400 15px var(--body); color: var(--muted); margin-left: 6px; }
+  .plan .when { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+  .plan ul { margin: 0 0 24px; padding-left: 20px; display: grid; gap: 10px; align-content: start; color: #C9C9CF; font-size: 15px; flex: 1; }
+  .plan .btn { width: 100%; }
+  .badge { align-self: flex-start; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: #10200D; background: var(--ok); border-radius: 999px; padding: 3px 10px; margin-bottom: 12px; }
+  .btn[aria-disabled="true"] { opacity: 0.55; pointer-events: none; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .compare-wrap { margin-top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .compare { width: 100%; border-collapse: collapse; font-size: 15px; table-layout: fixed; }
+  .compare caption { text-align: left; padding: 20px 20px 8px; font: 600 22px var(--display); color: var(--text); }
+  .compare th, .compare td { padding: 11px 12px; text-align: center; border-top: 1px solid var(--line); vertical-align: middle; }
+  .compare thead th { font: 600 15px var(--display); color: var(--text); border-top: 0; }
+  .compare thead th:last-child { color: var(--ok); }
+  .compare tbody th { text-align: left; font-weight: 400; color: #C9C9CF; }
+  .compare th:first-child { width: 40%; padding-left: 20px; }
+  .compare td { color: var(--text); }
+  .compare td:last-child { background: rgba(122, 220, 105, 0.06); }
+  .compare td.y { color: var(--ok); font-size: 18px; font-weight: 700; }
+  .compare td.n { color: #74757F; }
+  .compare tr.group th { padding-top: 18px; text-align: left; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; background: var(--surface-2); }
+  @media (max-width: 600px) {
+    .compare { font-size: 13px; }
+    .compare th, .compare td { padding: 9px 6px; }
+    .compare th:first-child { width: 38%; padding-left: 12px; }
+    .compare thead th { font-size: 13px; }
+    .compare caption { padding: 16px 12px 6px; font-size: 19px; }
+  }
+  .partners { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; padding: 26px 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+  .partners h3 { font-size: 22px; margin-bottom: 6px; }
+  .partners p { color: #C9C9CF; max-width: 640px; font-size: 15px; }
+  .adapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .adapters .btn { min-height: 38px; padding: 0 14px; font-size: 14px; white-space: normal; }
+  .disclose { color: var(--muted); font-size: 13px; margin-top: 8px; }
+
   footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
   footer .wrap { display: grid; gap: 10px; }
   footer a { color: var(--muted); }
@@ -173,6 +218,7 @@
       <a href="#how">How it works</a>
       <a href="#features">Features</a>
       <a href="#privacy">Privacy</a>
+      <a href="#pricing">Pricing</a>
       <a href="#install">Install</a>
       <a href="https://github.com/AmResthtx/autosentry2">GitHub</a>
     </div>
@@ -243,7 +289,7 @@
         <li>
           <p class="power"><i></i>Low power</p>
           <h3>Shut off</h3>
-          <p>Two minutes after the engine stops, the trip closes and is logged with distance, fuel used and average MPG.</p>
+          <p>Two minutes after the engine stops, the trip closes and is logged with its distance and engine time.</p>
         </li>
       </ol>
     </div>
@@ -282,7 +328,7 @@
         <article class="feature">
           <svg viewBox="0 0 24 24" stroke="#F25DA6" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/></svg>
           <h3>Trip computer</h3>
-          <p>Speed, distance and real-time MPG from MAF airflow and GPS speed, with every trip logged automatically.</p>
+          <p>Speed, distance and engine hours, with every trip logged automatically. MPG on the 7.3L comes once Ford&rsquo;s fuel-quantity reading is verified on a real truck.</p>
         </article>
         <article class="feature">
           <svg viewBox="0 0 24 24" stroke="#F0463C" aria-hidden="true"><path d="M12 4l9 16H3zM12 10v4M12 17v.5"/></svg>
@@ -324,6 +370,103 @@
     </div>
   </section>
 
+  <section id="pricing">
+    <div class="wrap">
+      <p class="kicker">Pricing</p>
+      <h2>The app is free. Proof sells the truck.</h2>
+      <p class="intro">Three levels, each built on the one before it. Everything you need to run the truck is free. You pay only for the report a buyer reads when you sell, or to back the build early.</p>
+      <div class="plans">
+        <article class="plan">
+          <p class="level">Level 1</p>
+          <h3>Free</h3>
+          <p class="for">For running your truck</p>
+          <p class="price">$0</p>
+          <p class="when">Free forever, no account</p>
+          <p class="plus">What you get:</p>
+          <ul>
+            <li>Automatic trip tracking from key-on</li>
+            <li>Live gauges, including the 7.3L&rsquo;s Ford oil temp, ICP and IPR</li>
+            <li>Trouble codes, the key-on check and the Truck Systems scan</li>
+            <li>Service schedule and reminders for about 20 items</li>
+            <li>Service log with receipts and photos</li>
+            <li>Parts for each job as it comes due</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://github.com/AmResthtx/autosentry2/releases/latest">Download for Android</a>
+        </article>
+        <article class="plan">
+          <p class="level">Level 2</p>
+          <h3>Resale Report</h3>
+          <p class="for">For selling a truck</p>
+          <p class="price">$19<small>per truck</small></p>
+          <p class="when">Coming with the public release</p>
+          <p class="plus">Everything in Free, plus:</p>
+          <ul>
+            <li>A PDF of the truck&rsquo;s full service history, with receipts and photos</li>
+            <li>Miles and engine hours the app recorded itself, not typed in</li>
+            <li>Each record labeled by its proof, from receipt-matched to self-reported</li>
+            <li>Re-export it as often as you like until the truck sells</li>
+          </ul>
+          <p class="foot">Covers one truck. A second truck is another $19.</p>
+          <a class="btn btn-ghost" data-notify href="https://github.com/AmResthtx/autosentry2/releases">Get notified</a>
+        </article>
+        <article class="plan featured">
+          <span class="badge" data-spots>First 100 owners</span>
+          <p class="level">Level 3</p>
+          <h3>Founding Member</h3>
+          <p class="for">For owners backing the build</p>
+          <p class="price">$39<small>one time</small></p>
+          <p class="when">Available now, while spots last</p>
+          <p class="plus">Everything in Resale Report, plus:</p>
+          <ul>
+            <li>Resale Reports for every truck you ever own, not just one</li>
+            <li>New builds before the public</li>
+            <li>A direct line to the builder</li>
+            <li>A vote on which engine gets supported next</li>
+            <li>Your name in the app credits, if you want it</li>
+          </ul>
+          <p class="foot">Full refund any time before the Resale Report ships.</p>
+          <a class="btn btn-primary" data-checkout href="#pricing" aria-disabled="true">Opening soon</a>
+        </article>
+      </div>
+
+      <div class="compare-wrap">
+        <table class="compare">
+          <caption>Compare the levels</caption>
+          <thead>
+            <tr><th scope="col"><span class="sr">Feature</span></th><th scope="col">Free</th><th scope="col">Resale Report</th><th scope="col">Founding Member</th></tr>
+          </thead>
+          <tbody>
+            <tr class="group"><th scope="rowgroup" colspan="4">Run the truck</th></tr>
+            <tr><th scope="row">Automatic key-on tracking</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Live gauges with Ford 7.3L readings</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Trouble codes and Truck Systems scan</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Service schedule and reminders</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Service log with receipts and photos</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Parts for jobs coming due</th><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr class="group"><th scope="rowgroup" colspan="4">Sell the truck</th></tr>
+            <tr><th scope="row">Resale Report PDF</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td>1 truck</td><td>Every truck you own</td></tr>
+            <tr><th scope="row">Re-export until it sells</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="y">&check;<span class="sr"> Included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr class="group"><th scope="rowgroup" colspan="4">Back the build</th></tr>
+            <tr><th scope="row">New builds before the public</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Direct line to the builder</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Vote on the next engine</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="y">&check;<span class="sr"> Included</span></td></tr>
+            <tr><th scope="row">Name in the credits</th><td class="n">&mdash;<span class="sr"> Not included</span></td><td class="n">&mdash;<span class="sr"> Not included</span></td><td>Optional</td></tr>
+            <tr class="group"><th scope="rowgroup" colspan="4">Cost</th></tr>
+            <tr><th scope="row">Price</th><td>$0</td><td>$19 per truck</td><td>$39 once</td></tr>
+            <tr><th scope="row">Available</th><td>Now</td><td>At public release</td><td>Now, first 100</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="partners">
+        <div>
+          <h3>Sell 7.3L parts?</h3>
+          <p>AutoSentry shows owners the parts for a service when it reaches 80% of its interval, before it&rsquo;s due. One launch partner per job, clearly labeled Sponsored, never next to a trouble code.</p>
+        </div>
+        <a class="btn btn-ghost" data-partner href="https://github.com/AmResthtx/autosentry2/issues/new?title=Launch%20partner%20inquiry">Become a launch partner</a>
+      </div>
+    </div>
+  </section>
+
   <section id="install">
     <div class="wrap">
       <p class="kicker">Install</p>
@@ -333,7 +476,13 @@
           <h3>What you need</h3>
           <ul>
             <li>An Android 7.0 or newer phone or tablet.</li>
-            <li>An ELM327-compatible OBD-II adapter that uses classic Bluetooth. Bluetooth LE-only adapters won&rsquo;t connect.</li>
+            <li>An ELM327-compatible OBD-II adapter that uses classic Bluetooth. Bluetooth LE-only adapters (like the OBDLink CX) won&rsquo;t connect.
+              <div class="adapters">
+                <a class="btn btn-ghost" data-amazon="OBDLink MX+" href="https://www.amazon.com/s?k=OBDLink+MX%2B">OBDLink MX+ (recommended)</a>
+                <a class="btn btn-ghost" data-amazon="OBDLink LX Bluetooth" href="https://www.amazon.com/s?k=OBDLink+LX+Bluetooth">OBDLink LX</a>
+              </div>
+              <p class="disclose" data-if-tag hidden>As an Amazon Associate AutoSentry earns from qualifying purchases.</p>
+            </li>
             <li>An OBD-II vehicle. Readings and the service schedule are tuned for the 2000 F-250 7.3L Power Stroke; other vehicles get the standard readings they answer.</li>
           </ul>
           <p class="note">For the 7.3L&rsquo;s Ford readings (oil temp, ICP, IPR), the adapter must support the truck&rsquo;s J1850 PWM protocol.</p>
@@ -365,11 +514,49 @@
 <footer>
   <div class="wrap">
     <p>AutoSentry is open source under the <a href="https://github.com/AmResthtx/autosentry2/blob/master/LICENSE">Apache 2.0 license</a>. <a href="https://github.com/AmResthtx/autosentry2">Source on GitHub</a>.</p>
+    <p class="disclose" data-if-tag hidden>Some links on this page are affiliate links: AutoSentry earns a commission on qualifying purchases at no cost to you. As an Amazon Associate AutoSentry earns from qualifying purchases.</p>
     <p>The maintenance schedule is a starting point, not a substitute for the owner&rsquo;s manual, the service manual or a qualified inspection. AutoSentry is not affiliated with Ford Motor Company; Ford and Power Stroke are trademarks of their owners.</p>
   </div>
 </footer>
 
 <script>
+// Money settings. An empty value leaves that button in its safe default, so the page never
+// links to a checkout that doesn't exist. See docs/business/BUSINESS_PLAN.md.
+var SHOP = {
+  foundingCheckoutUrl: '',   // Stripe Payment Link for the $39 Founding Member, e.g. https://buy.stripe.com/...
+  foundingSpotsLeft: null,   // a number shows "37 of 100 spots left"; null shows "First 100 owners"
+  notifyUrl: '',             // waitlist form (Google Form, etc.); empty keeps the GitHub releases link
+  partnerEmail: '',          // where vendor inquiries go; empty keeps the GitHub issue link
+  amazonTag: ''              // Amazon Associates tracking ID, e.g. autosentry-20
+};
+(function () {
+  function each(sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
+  if (SHOP.foundingCheckoutUrl) {
+    each('[data-checkout]', function (a) {
+      a.href = SHOP.foundingCheckoutUrl;
+      a.textContent = 'Become a Founding Member';
+      a.removeAttribute('aria-disabled');
+    });
+  }
+  if (SHOP.foundingSpotsLeft != null) {
+    each('[data-spots]', function (b) { b.textContent = SHOP.foundingSpotsLeft + ' of 100 spots left'; });
+  }
+  if (SHOP.notifyUrl) each('[data-notify]', function (a) { a.href = SHOP.notifyUrl; });
+  if (SHOP.partnerEmail) {
+    each('[data-partner]', function (a) {
+      a.href = 'mailto:' + SHOP.partnerEmail + '?subject=' + encodeURIComponent('AutoSentry launch partner');
+    });
+  }
+  if (SHOP.amazonTag) {
+    each('[data-amazon]', function (a) {
+      a.href = 'https://www.amazon.com/s?k=' + encodeURIComponent(a.getAttribute('data-amazon')) +
+        '&tag=' + encodeURIComponent(SHOP.amazonTag);
+      a.rel = 'sponsored noopener';
+    });
+    each('[data-if-tag]', function (p) { p.hidden = false; });
+  }
+})();
+
 // Dashboard preview. Ports GaugeTileView and GaugeScale from the app so the tiles look like
 // the real thing; the viewBox is the tile size (s = 100).
 (function () {

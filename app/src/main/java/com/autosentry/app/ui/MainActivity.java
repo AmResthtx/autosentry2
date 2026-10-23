@@ -33,6 +33,10 @@ import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.BuildConfig;
 import com.autosentry.app.R;
+import com.autosentry.app.business.BusinessConfig;
+import com.autosentry.app.business.DealsCatalog;
+import com.autosentry.app.business.DealsMatcher;
+import com.autosentry.app.business.PartOffer;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.MaintenanceEvent;
@@ -77,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int TAB_DASHBOARD = 0;
     private static final int TAB_DIAGNOSTICS = 1;
     private static final int TAB_HISTORY = 2;
+    private static final int TAB_DEALS = 3;
     private static final int KOEO_REPORTS_SHOWN = 5;
     private static final String[] TAB_TITLES = {"Dashboard", "Checks", "History", "Deals", "Account"};
     private static final String STOP_CONFIRM_WORD = "STOP";
@@ -115,8 +120,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView textHealth, textAlert;
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer,
             textKoeoReports, textMilStatus, textCodesScanInfo;
-    private LinearLayout layoutServiceList, layoutCodesList;
+    private LinearLayout layoutServiceList, layoutCodesList, layoutDealsList;
     private String lastServiceListSignature = "";
+    private String lastDealsSignature = "";
     private String lastCodesSignature = "";
     private DiagnosticCodes.Scan savedCodeScan;
     private ImageButton buttonEditDashboard, buttonToggleTracking;
@@ -156,6 +162,7 @@ public class MainActivity extends AppCompatActivity {
         textOilDetail = findViewById(R.id.textOilDetail);
         textOdometer = findViewById(R.id.textOdometer);
         layoutServiceList = findViewById(R.id.layoutServiceList);
+        layoutDealsList = findViewById(R.id.layoutDealsList);
         textMilStatus = findViewById(R.id.textMilStatus);
         textCodesScanInfo = findViewById(R.id.textCodesScanInfo);
         layoutCodesList = findViewById(R.id.layoutCodesList);
@@ -859,6 +866,7 @@ public class MainActivity extends AppCompatActivity {
     /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
         final boolean needServiceList = currentTab == TAB_HISTORY;
+        final boolean needDeals = currentTab == TAB_DEALS;
         final boolean needKoeo = currentTab == TAB_DIAGNOSTICS;
         final long trackingStart = AppSettings.getMaintenanceTrackingStart(this);
         final Set<String> hidden = AppSettings.getHiddenServiceItems(this);
@@ -867,7 +875,7 @@ public class MainActivity extends AppCompatActivity {
             if (profile == null) return;
             lastProfile = profile;
 
-            List<ServiceStatus> statuses = needServiceList
+            List<ServiceStatus> statuses = needServiceList || needDeals
                     ? MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao(), trackingStart,
                             db.sessionDao().milesSince(trackingStart))
                     : null;
@@ -893,7 +901,8 @@ public class MainActivity extends AppCompatActivity {
                 textOilDetail.setText(String.format(Locale.US,
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));
-                if (statuses != null) renderServiceList(statuses, hidden);
+                if (statuses != null && needServiceList) renderServiceList(statuses, hidden);
+                if (statuses != null && needDeals) renderDeals(statuses, hidden);
                 if (needKoeo) textKoeoReports.setText(koeoText);
             });
         });
@@ -974,6 +983,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addSectionHeader(String label) {
+        addSectionHeader(layoutServiceList, label);
+    }
+
+    private void addSectionHeader(LinearLayout target, String label) {
         float density = getResources().getDisplayMetrics().density;
         TextView header = new TextView(this);
         header.setText(label.toUpperCase(Locale.US));
@@ -982,10 +995,15 @@ public class MainActivity extends AppCompatActivity {
         header.setTextColor(cMuted);
         header.setLetterSpacing(0.06f);
         header.setPadding(0, Math.round(18 * density), 0, Math.round(4 * density));
-        layoutServiceList.addView(header);
+        target.addView(header);
     }
 
     private void addRow(int stripColor, String title, String subtitle, int subtitleColor,
+                        View.OnClickListener onClick, View.OnLongClickListener onLongClick) {
+        addRow(layoutServiceList, stripColor, title, subtitle, subtitleColor, onClick, onLongClick);
+    }
+
+    private void addRow(LinearLayout target, int stripColor, String title, String subtitle, int subtitleColor,
                         View.OnClickListener onClick, View.OnLongClickListener onLongClick) {
         float density = getResources().getDisplayMetrics().density;
         int pad = Math.round(12 * density);
@@ -1032,11 +1050,68 @@ public class MainActivity extends AppCompatActivity {
         chevron.setPadding(pad, 0, Math.round(4 * density), 0);
         row.addView(chevron);
 
-        layoutServiceList.addView(row);
+        target.addView(row);
 
         View divider = new View(this);
         divider.setBackgroundColor(ContextCompat.getColor(this, R.color.fs_divider));
-        layoutServiceList.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        target.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+    }
+
+    // ---------------------------------------------------------------- Deals tab
+
+    /**
+     * Parts for every job at 80% of its interval or past it, most urgent first,
+     * then the supported adapters. Links open in the browser; the app itself
+     * stays offline. Trouble codes never feed this list (see DealsMatcher).
+     */
+    private void renderDeals(List<ServiceStatus> statuses, Set<String> hidden) {
+        List<DealsMatcher.DealGroup> groups = DealsMatcher.match(statuses, hidden);
+        StringBuilder signature = new StringBuilder();
+        for (DealsMatcher.DealGroup g : groups) signature.append('|').append(serviceSubtitle(g.status));
+        if (signature.toString().equals(lastDealsSignature) && layoutDealsList.getChildCount() > 0) return;
+        lastDealsSignature = signature.toString();
+        layoutDealsList.removeAllViews();
+
+        if (BusinessConfig.anyPaidLinks()) addDealsNote(BusinessConfig.disclosure());
+
+        if (groups.isEmpty()) {
+            addSectionHeader(layoutDealsList, "Coming due");
+            addDealsNote("Nothing is due soon. Parts for a service show up here once it reaches 80% of its "
+                    + "interval, early enough to order them and have them arrive before it's due.");
+        }
+        for (DealsMatcher.DealGroup g : groups) {
+            int color = g.status.overdue ? cCrit : cWarn;
+            addSectionHeader(layoutDealsList, g.status.displayName + " · " + (g.status.overdue ? "overdue" : "due soon")
+                    + (g.status.remainingText().isEmpty() ? "" : " · " + g.status.remainingText()));
+            for (PartOffer offer : g.offers) addOfferRow(offer, color);
+        }
+
+        addSectionHeader(layoutDealsList, "Supported OBD adapters");
+        for (PartOffer offer : DealsCatalog.adapters()) addOfferRow(offer, cMuted);
+    }
+
+    private void addOfferRow(PartOffer offer, int stripColor) {
+        StringBuilder subtitle = new StringBuilder(offer.vendor);
+        if (!offer.label().isEmpty()) subtitle.append(" · ").append(offer.label());
+        if (!offer.note.isEmpty()) subtitle.append(" · ").append(offer.note);
+        addRow(layoutDealsList, stripColor, offer.title, subtitle.toString(), cMuted, v -> openLink(offer.url), null);
+    }
+
+    private void addDealsNote(String text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextSize(13);
+        note.setTextColor(cMuted);
+        note.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
+        layoutDealsList.addView(note);
+    }
+
+    private void openLink(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No browser found to open the link", Toast.LENGTH_LONG).show();
+        }
     }
 
     // ---------------------------------------------------------------- Trouble codes (Checks tab)

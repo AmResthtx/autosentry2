@@ -1,0 +1,65 @@
+# XcodeGen spec for the AutoSentry iPhone app. On a Mac:
+#   brew install xcodegen
+#   cd ios && xcodegen
+# then open AutoSentry.xcodeproj. The .xcodeproj is generated, so it isn't checked in.
+name: AutoSentry
+options:
+  bundleIdPrefix: com.autosentry
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  AutoSentry:
+    type: application
+    platform: iOS
+    sources:
+      - AutoSentry
+    info:
+      path: AutoSentry/Info.plist
+      properties:
+        CFBundleDisplayName: AutoSentry
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # The OBDLink MX+ talks to iPhones as an Apple-certified (MFi) accessory under this protocol.
+        UISupportedExternalAccessoryProtocols:
+          - com.obdlink
+        # external-accessory: keep talking to the adapter in the background.
+        # location: wake when the truck moves, and stay awake during a trip.
+        UIBackgroundModes:
+          - external-accessory
+          - location
+        NSLocationWhenInUseUsageDescription: >-
+          AutoSentry uses your location to notice the truck moving, so it can wake up and
+          start recording without you opening it.
+        NSLocationAlwaysAndWhenInUseUsageDescription: >-
+          With "Always", AutoSentry can wake up by itself when the truck starts moving and
+          record the trip. Your location never leaves the phone.
+    settings:
+      base:
+        # Change this if Xcode says the ID is taken, e.g. com.yourname.autosentry.
+        PRODUCT_BUNDLE_IDENTIFIER: com.autosentry.app
+        TARGETED_DEVICE_FAMILY: "1"
+  AutoSentryTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AutoSentryTests
+    dependencies:
+      - target: AutoSentry
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.autosentry.app.tests
+schemes:
+  AutoSentry:
+    build:
+      targets:
+        AutoSentry: all
+    test:
+      targets:
+        - AutoSentryTests

@@ -48,7 +48,9 @@
     <string name="clear_codes">Clear Codes</string>
     <string name="truck_systems">Truck Systems</string>
     <string name="scan_truck_systems">Scan Truck Systems</string>
-    <string name="systems_scan_hint">Finds everything this truck will talk about: the adapter, the bus, every module that answers, every standard reading, and the Ford PIDs the engine computer answers. Read-only. Takes a few minutes.</string>
+    <string name="systems_scan_hint">Finds out what this truck talks about. By default it only listens for 30 seconds and sends the truck nothing. Tick the first box to also ask the truck: every module, every standard reading, trouble codes, and the Ford PIDs (a few minutes). A read-only lock refuses anything that is not a read. Reports save to Downloads/AutoSentry.</string>
+    <string name="active_scan_option">Send read requests to the truck (active scan)</string>
+    <string name="include_vin_option">Show the VIN in the report</string>
     <string name="run_systems_scan">Run Scan</string>
     <string name="stop_scan">Stop</string>
     <string name="codes_disclaimer">Severity is AutoSentry\'s guidance from the 7.3L code list, not a diagnosis. Injector driver module codes behind P1316 need a full self-test (FORScan or a Ford scan tool).</string>

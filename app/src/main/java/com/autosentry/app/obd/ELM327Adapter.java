@@ -58,12 +58,26 @@ public class ELM327Adapter {
     }
 
     private volatile Trace trace = null;
+    // Set only while the systems scan runs: every write is checked against it first.
+    private volatile ReadOnlyGuard guard = null;
+
+    /** Receives each line the adapter hears while monitoring. Return false to stop early. */
+    public interface LineSink {
+        boolean line(long atMs, String line);
+    }
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
     }
 
     public ELM327Adapter() {}
+
+    /** For tests: an adapter already connected to these streams. */
+    ELM327Adapter(InputStream in, OutputStream out) {
+        inputStream = in;
+        outputStream = out;
+        connected = true;
+    }
     public void setAdapterAddress(String address) { this.adapterAddress = address; }
 
     public synchronized boolean connect() throws IOException, InterruptedException {
@@ -263,6 +277,63 @@ public class ELM327Adapter {
         return trace;
     }
 
+    /** Installs (or with null, removes) the read-only lock every command must pass. */
+    public void setGuard(ReadOnlyGuard guard) {
+        this.guard = guard;
+    }
+
+    public ReadOnlyGuard getGuard() {
+        return guard;
+    }
+
+    /**
+     * Listens with ATMA for {@code ms}, passing every line heard to {@code sink}.
+     * The adapter transmits nothing on the bus while monitoring. Any character
+     * stops it; a space is used because a bare CR would repeat the last command.
+     */
+    public synchronized void monitor(long ms, LineSink sink) throws IOException {
+        if (outputStream == null || inputStream == null) throw new IOException("Not connected to adapter");
+        ReadOnlyGuard g = guard;
+        if (g != null) g.beforeSend("ATMA");
+        drainInput();
+        outputStream.write("ATMA\r".getBytes());
+        outputStream.flush();
+        long deadline = System.currentTimeMillis() + ms;
+        StringBuilder partial = new StringBuilder();
+        byte[] buffer = new byte[512];
+        boolean ended = false; // the adapter stopped on its own (prompt came back)
+        try {
+            while (System.currentTimeMillis() < deadline && !ended) {
+                int available = inputStream.available();
+                if (available <= 0) {
+                    sleepBriefly();
+                    continue;
+                }
+                int read = inputStream.read(buffer, 0, Math.min(available, buffer.length));
+                if (read < 0) throw new IOException("Adapter closed the connection");
+                long now = System.currentTimeMillis();
+                for (int i = 0; i < read; i++) {
+                    char c = (char) buffer[i];
+                    if (c == '>') {
+                        ended = true;
+                    } else if (c == '\r' || c == '\n') {
+                        String line = partial.toString().trim();
+                        partial.setLength(0);
+                        if (!line.isEmpty() && !sink.line(now, line)) deadline = 0;
+                    } else {
+                        partial.append(c);
+                    }
+                }
+            }
+        } finally {
+            if (!ended) {
+                outputStream.write(' ');
+                outputStream.flush();
+                readResponse(AT_TIMEOUT_MS); // "STOPPED" and the prompt
+            }
+        }
+    }
+
     /**
      * Any command, for the systems scan. A caller that changes adapter
      * settings (headers, protocol) must reconnect afterwards so ATZ resets them.
@@ -372,21 +443,45 @@ public class ELM327Adapter {
     }
 
     private String command(String cmd, long timeoutMs) throws IOException {
-        sendCommand(cmd);
-        String reply = readResponse(timeoutMs);
-        Trace t = trace;
-        if (t != null) t.exchange(cmd, reply);
-        return reply;
+        ReadOnlyGuard g = guard;
+        for (int attempt = 1; ; attempt++) {
+            if (g != null) g.beforeSend(cmd);
+            write(cmd);
+            String reply = readResponse(timeoutMs);
+            Trace t = trace;
+            if (t != null) t.exchange(cmd, reply);
+            if (g == null || !g.afterReply(cmd, reply, attempt)) return reply;
+        }
     }
 
+    /** Writes one command. While a guard is installed, anything it refuses is never written. */
     public synchronized void sendCommand(String cmd) throws IOException {
+        ReadOnlyGuard g = guard;
+        if (g != null) g.beforeSend(cmd);
+        write(cmd);
+    }
+
+    private void write(String cmd) throws IOException {
         if (outputStream == null) throw new IOException("Not connected to adapter");
-        // Throw away anything left over from a previous timed-out command.
+        drainInput();
+        outputStream.write((cmd + "\r").getBytes());
+        outputStream.flush();
+    }
+
+    /** Throws away anything left over from a previous timed-out command. */
+    private void drainInput() throws IOException {
         while (inputStream != null && inputStream.available() > 0) {
             inputStream.skip(inputStream.available());
         }
-        outputStream.write((cmd + "\r").getBytes());
-        outputStream.flush();
+    }
+
+    private static void sleepBriefly() throws IOException {
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while reading adapter");
+        }
     }
 
     public String readResponse() throws IOException {

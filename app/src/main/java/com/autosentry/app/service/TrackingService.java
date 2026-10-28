@@ -834,15 +834,13 @@ public class TrackingService extends Service {
         try {
             String phone = android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
                     + ", Android " + android.os.Build.VERSION.RELEASE;
-            TruckProbe.Result result = TruckProbe.run(realAdapter, phone,
+            TruckProbe.Options options = new TruckProbe.Options();
+            options.active = SystemsScan.active;
+            options.includeVin = SystemsScan.includeVin;
+            TruckProbe.Result result = TruckProbe.run(realAdapter, phone, options,
                     step -> SystemsScan.progress = step, () -> SystemsScan.cancel || stopped);
             SystemsScan.lastReport = result.report;
-            try {
-                java.nio.file.Files.write(new java.io.File(getFilesDir(), SystemsScan.REPORT_FILE).toPath(),
-                        result.report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                AppLog.e(this, TAG, "Couldn't save the systems report", e);
-            }
+            saveSystemsReport(result, options.active);
             AppLog.i(this, TAG, "Systems scan finished" + (result.linkLost ? " early: the adapter dropped" : ""));
         } finally {
             if (wakeLock != null) wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS); // back to the normal per-tick hold
@@ -856,6 +854,33 @@ public class TrackingService extends Service {
         // mid-scan this throws and the normal reconnect takes over.
         realAdapter.reinitialize();
         return true;
+    }
+
+    /**
+     * Keeps the latest report in the app's files (for the screen and Share) and
+     * saves a timestamped copy of both the text and JSON to Downloads/AutoSentry.
+     */
+    private void saveSystemsReport(TruckProbe.Result result, boolean active) {
+        try {
+            java.io.File dir = new java.io.File(getFilesDir(), SystemsScan.REPORT_DIR);
+            if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
+            java.nio.file.Files.write(new java.io.File(dir, SystemsScan.REPORT_FILE).toPath(),
+                    result.report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            java.nio.file.Files.write(new java.io.File(dir, SystemsScan.REPORT_JSON).toPath(),
+                    result.json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            AppLog.e(this, TAG, "Couldn't save the systems report", e);
+        }
+        String name = "truck-systems-" + (active ? "active" : "listen-only") + "-"
+                + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(new java.util.Date());
+        try {
+            String where = TabletFiles.save(this, name + ".txt", result.report);
+            TabletFiles.save(this, name + ".json", result.json);
+            SystemsScan.message = "Saved to " + where + " (and .json)";
+        } catch (IOException e) {
+            AppLog.e(this, TAG, "Couldn't save the systems report to Downloads", e);
+            SystemsScan.message = "Scan done, but saving to Downloads failed: " + e.getMessage();
+        }
     }
 
     /** Runs a scan or clear the Checks tab asked for, or the automatic scan after connecting. */

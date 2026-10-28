@@ -9,6 +9,39 @@ When a service comes due, it shows you the parts for that job. It also keeps
 a service history, backed by receipts, that you can show a buyer when you
 sell the truck.
 
+## MPG and PID availability
+
+**MPG is calculated by AutoSentry; it is not a value read directly from the
+truck.** Instant MPG is calculated from vehicle speed and mass airflow (MAF),
+using diesel air/fuel-ratio and fuel-density assumptions. Trip MPG is distance
+divided by estimated fuel used. These values depend on the readings and
+assumptions available to the app, so they are estimates rather than a direct
+measurement of fuel economy by the truck computer.
+
+The trip MPG display is simulator-only today. Real MPG for the target 2000
+F-250 7.3L is still in progress: this engine has no MAF sensor, and it may not
+answer the standard fuel-rate PID. Ford's fuel-quantity PID (MFDES) is
+experimental and must be validated on the truck before it can be used.
+
+AutoSentry discovers standard supported PIDs when the truck answers at
+connection time; it does not assume every vehicle supports every OBD-II
+reading. A reading marked **not available** or **truck didn't answer** means
+the truck or the module that provides it did not return a usable response. The
+computer may be asleep (for example, with the key off), the bus may not be
+ready, or that vehicle/module may not support or answer that PID. It does not
+necessarily mean the adapter is broken. The Checks tab's Truck Systems scan
+reports responding modules and readings; it can also probe Ford enhanced
+readings, which are separate from standard OBD-II PIDs.
+
+Readings are labeled by what they represent:
+
+- **Measured:** reported by the truck, adapter, or GPS.
+- **Recorded:** saved by AutoSentry over time, such as trip distance and
+  service history.
+- **Calculated:** derived by the app, including Instant MPG and trip MPG.
+- **Recommended:** maintenance or parts guidance, not a truck measurement.
+- **Unavailable:** no usable response was received for that reading.
+
 ---
 
 ## The problem
@@ -57,6 +90,11 @@ sell the truck.
 
 ## Business model
 
+AutoSentry is focused on the 2000 F-250 7.3L and the owners who keep these
+trucks running. Supplier and sponsor support is intended to help fund that
+vehicle-specific maintenance and history software; paid placements will be
+labeled and won't change diagnostic readings or maintenance guidance.
+
 - **Supplier placement (primary):** parts suppliers pay to be in front of
   owners at the moment a service comes due. These are high-intent buyers:
   maintenance is a necessity to keep the truck on the road, not an
@@ -89,14 +127,14 @@ sell the truck.
 
 ## Principles
 
-- Show only real data. Measured, recorded, calculated, estimated, and
-  unavailable are always labeled as such.
+- Label data clearly as measured, recorded, calculated, recommended, or
+  unavailable.
 - Alerts must be accurate. The community forgives nothing.
 
 ## What we're adding
 
-**Already working:** auto-start at key-on, live dashboard, trip MPG
-(simulator only so far; see below), mileage and engine-hour tracking, oil
+**Already working:** auto-start at key-on, live dashboard, simulated trip MPG,
+mileage and engine-hour tracking, oil
 life, service schedule with due-soon alerts, a maintenance log with photos,
 a setup wizard, and a key-on check with crank timing on every start.
 

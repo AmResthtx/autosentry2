@@ -184,6 +184,10 @@ ui/             MainActivity, DebugLogActivity, LogMaintenanceActivity,
 
 All storage is local (Room + SharedPreferences). No account or cloud dependency is required for the monitoring workflow.
 
+## Truck Systems scan (read-only)
+
+Open **Truck Systems** in the app and tap Run Scan. By default the scan only listens for 30 seconds and sends the truck nothing. Tick *Send read requests* to also ask the truck (a few minutes). A read-only lock (`ReadOnlyGuard`) sits on the adapter's single write point for the whole scan, and the report lists every request that went out. Each report is saved to Downloads/AutoSentry as text and JSON. The VIN is hidden unless *Show the VIN* is ticked.
+
 ## Building
 
 ```bash

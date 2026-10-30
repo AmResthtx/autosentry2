@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,8 +25,9 @@ import java.nio.file.Files;
 
 /**
  * Truck Systems: runs TruckProbe through TrackingService and shows the report
- * of everything this truck answers. The last report is kept on the phone so
- * it can be shared later (Share sends the text file anywhere).
+ * of everything this truck answers. Listen-only unless "Send read requests"
+ * is ticked. Each report is saved to Downloads/AutoSentry (text and JSON),
+ * and the latest is kept in the app so Share can send it anywhere.
  */
 public class SystemsScanActivity extends AppCompatActivity {
     private static final long REFRESH_MS = 500L;
@@ -35,6 +37,7 @@ public class SystemsScanActivity extends AppCompatActivity {
 
     private TextView textStatus, textReport;
     private Button buttonRun;
+    private CheckBox checkActive, checkIncludeVin;
     private String shownReport = null;
 
     @Override
@@ -47,6 +50,10 @@ public class SystemsScanActivity extends AppCompatActivity {
         textReport = findViewById(R.id.textReport);
         buttonRun = findViewById(R.id.buttonRunScan);
         Button buttonShare = findViewById(R.id.buttonShareReport);
+        checkActive = findViewById(R.id.checkActiveScan);
+        checkIncludeVin = findViewById(R.id.checkIncludeVin);
+        checkActive.setChecked(SystemsScan.active);
+        checkIncludeVin.setChecked(SystemsScan.includeVin);
 
         buttonRun.setOnClickListener(v -> {
             if (SystemsScan.busy) {
@@ -57,6 +64,8 @@ public class SystemsScanActivity extends AppCompatActivity {
                 Toast.makeText(this, "Pair your OBD adapter on the Account tab first", Toast.LENGTH_LONG).show();
                 return;
             }
+            SystemsScan.active = checkActive.isChecked();
+            SystemsScan.includeVin = checkIncludeVin.isChecked();
             SystemsScan.request();
             if (!TrackingService.isRunning) {
                 try {
@@ -84,6 +93,8 @@ public class SystemsScanActivity extends AppCompatActivity {
     private void refresh() {
         boolean busy = SystemsScan.busy;
         buttonRun.setText(busy ? getString(R.string.stop_scan) : getString(R.string.run_systems_scan));
+        checkActive.setEnabled(!busy);
+        checkIncludeVin.setEnabled(!busy);
         if (busy) {
             String progress = SystemsScan.progress;
             textStatus.setText(SystemsScan.cancel ? "Stopping…" : (progress != null ? progress : "Scanning…"));
@@ -106,7 +117,7 @@ public class SystemsScanActivity extends AppCompatActivity {
     }
 
     private File reportFile() {
-        return new File(getFilesDir(), SystemsScan.REPORT_FILE);
+        return new File(new File(getFilesDir(), SystemsScan.REPORT_DIR), SystemsScan.REPORT_FILE);
     }
 
     private String readSavedReport() {

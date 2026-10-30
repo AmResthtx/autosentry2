@@ -2,4 +2,5 @@
 <paths>
     <files-path name="debug_log" path="logs/" />
     <files-path name="maintenance_photos" path="maintenance_photos/" />
+    <files-path name="reports" path="reports/" />
 </paths>

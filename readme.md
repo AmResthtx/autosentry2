@@ -1,6 +1,6 @@
 # AutoSentry
 
-**FORScan meets CARFAX, built for the 7.3L Power Stroke.**
+built for the 7.3L Power Stroke.**
 
 Pair an OBDLink adapter once. From then on, every time the key turns and the
 wait-to-start light comes on, AutoSentry wakes up and records the truck.

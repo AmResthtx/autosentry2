@@ -34,6 +34,12 @@ public class ReadOnlyGuardTest {
         return new ReadOnlyGuard(false, 100, 250, clock);
     }
 
+    /** Checks a command and, as the adapter does once the write succeeds, records it as sent. */
+    private static void send(ReadOnlyGuard guard, String command) throws IOException {
+        guard.beforeSend(command);
+        guard.sent(command);
+    }
+
     private static void assertBlocked(ReadOnlyGuard guard, String command) {
         try {
             guard.beforeSend(command);
@@ -49,7 +55,7 @@ public class ReadOnlyGuardTest {
     public void readsAreAllowed() throws IOException {
         ReadOnlyGuard guard = active(new FakeClock());
         for (String cmd : new String[]{"0100", "010C", "020200", "03", "07", "0900", "0902", "0A", "221446", "1902FF"}) {
-            guard.beforeSend(cmd);
+            send(guard, cmd);
         }
         assertEquals(10, guard.busFrames().size());
         assertTrue(guard.rejected().isEmpty());
@@ -79,7 +85,7 @@ public class ReadOnlyGuardTest {
         ReadOnlyGuard guard = active(new FakeClock());
         for (String cmd : new String[]{"ATI", "AT@1", "ATRV", "ATDP", "ATDPN", "ATH1", "ATH0", "ATSHC410F1",
                 "ATSH7E0", "ATIFR0", "ATCSM1", "ATMA", "STI", "STDI", "AT E0"}) {
-            guard.beforeSend(cmd);
+            send(guard, cmd);
         }
         assertTrue(guard.busFrames().isEmpty());
         assertTrue(guard.rejected().isEmpty());
@@ -101,17 +107,17 @@ public class ReadOnlyGuardTest {
         assertTrue(guard.isListenOnly());
         assertBlocked(guard, "0100");
         assertBlocked(guard, "0902");
-        guard.beforeSend("ATI");
-        guard.beforeSend("ATMA");
+        send(guard, "ATI");
+        send(guard, "ATMA");
         assertTrue(guard.busFrames().isEmpty());
     }
 
     @Test
     public void framesAreLoggedWithTheirHeader() throws IOException {
         ReadOnlyGuard guard = active(new FakeClock());
-        guard.beforeSend("0100");
-        guard.beforeSend("ATSHC410F1");
-        guard.beforeSend("221310");
+        send(guard, "0100");
+        send(guard, "ATSHC410F1");
+        send(guard, "221310");
         assertEquals("[default] 0100", guard.busFrames().get(0));
         assertEquals("[C410F1] 221310", guard.busFrames().get(1));
         assertEquals(Integer.valueOf(1), guard.adapterCommands().get("ATSHC410F1"));
@@ -121,9 +127,9 @@ public class ReadOnlyGuardTest {
     public void requestsArePaced() throws IOException {
         FakeClock clock = new FakeClock();
         ReadOnlyGuard guard = active(clock);
-        guard.beforeSend("0100");
+        send(guard, "0100");
         clock.now += 30;
-        guard.beforeSend("010C");
+        send(guard, "010C");
         assertEquals(List.of(70L), clock.sleeps);
     }
 
@@ -131,7 +137,7 @@ public class ReadOnlyGuardTest {
     public void busyOrPendingModulesGetARetryAfterBackingOff() throws IOException {
         FakeClock clock = new FakeClock();
         ReadOnlyGuard guard = active(clock);
-        guard.beforeSend("221446");
+        send(guard, "221446");
         assertTrue(guard.afterReply("221446", "7F2278\r\r>", 1));
         assertTrue(guard.afterReply("221446", "7F2221\r\r>", 2));
         assertTrue(clock.sleeps.contains(250L));
@@ -141,8 +147,8 @@ public class ReadOnlyGuardTest {
         assertFalse(guard.problems().isEmpty());
         // Backing off also slows every later request.
         clock.sleeps.clear();
-        guard.beforeSend("010C");
-        guard.beforeSend("010D");
+        send(guard, "010C");
+        send(guard, "010D");
         assertTrue(clock.sleeps.get(clock.sleeps.size() - 1) >= 250);
     }
 
@@ -183,7 +189,7 @@ public class ReadOnlyGuardTest {
     public void headersOnRepliesAreCheckedPastTheHeader() throws IOException {
         ReadOnlyGuard guard = active(new FakeClock());
         guard.afterReply("ATDPN", "A1\r\r>", 1);
-        guard.beforeSend("ATH1");
+        send(guard, "ATH1");
         assertFalse(guard.afterReply("0100", "486B10410008182000AA\r\r>", 1));
         try {
             guard.afterReply("0100", "486B10500300AA\r\r>", 1);
@@ -197,8 +203,57 @@ public class ReadOnlyGuardTest {
     public void canConsecutiveFramesAreNotMistakenForAnswers() throws IOException {
         ReadOnlyGuard guard = active(new FakeClock());
         guard.afterReply("ATDPN", "A6\r\r>", 1);
-        guard.beforeSend("ATH1");
+        send(guard, "ATH1");
         assertFalse(guard.afterReply("0902",
                 "7E8101449020131464D\r7E82143553131315830\r7E8224433303030303030\r\r>", 1));
+    }
+
+    @Test
+    public void nothingIsRecordedAsSentUntilTheWriteGoesThrough() throws IOException {
+        ReadOnlyGuard guard = active(new FakeClock());
+        guard.beforeSend("010C");
+        assertTrue(guard.busFrames().isEmpty());
+        guard.writeFailed("010C");
+        assertTrue(guard.busFrames().isEmpty());
+        assertEquals("[default] 010C", guard.unconfirmed().get(0));
+        guard.beforeSend("ATSHC410F1");
+        assertTrue(guard.adapterCommands().isEmpty());
+    }
+
+    @Test
+    public void aReplyForADifferentPidStopsTheScan() throws IOException {
+        String[][] mismatches = {
+                {"221446", "6213102328\r\r>"},
+                {"010D", "410C1AF8\r\r>"},
+                {"020200", "4202010470\r\r>"},
+                {"0904", "4902014D4F\r\r>"},
+        };
+        for (String[] m : mismatches) {
+            ReadOnlyGuard guard = active(new FakeClock());
+            try {
+                guard.afterReply(m[0], m[1], 1);
+                fail("a reply to another PID should stop the scan: " + m[0]);
+            } catch (ReadOnlyGuard.Abort expected) {
+                // stopped
+            }
+        }
+        ReadOnlyGuard guard = active(new FakeClock());
+        assertFalse(guard.afterReply("221446", "621446037D\r\r>", 1));
+        assertFalse(guard.afterReply("03", "43047000000000\r\r>", 1));
+    }
+
+    @Test
+    public void bothErrorsAndAbortsKeepTheVinOutOfTheReport() throws IOException {
+        ReadOnlyGuard guard = active(new FakeClock());
+        String vinHex = "31464D";
+        guard.afterReply("0902", "49020131464D4E57\rBUS ERROR\r\r>", 1);
+        for (String p : guard.problems()) assertFalse(p, p.contains(vinHex));
+        assertTrue(guard.problems().get(0).contains("BUS ERROR"));
+        try {
+            guard.afterReply("0902", "4A0131464D4E57\r\r>", 2);
+            fail("a reply from another service should stop the scan");
+        } catch (ReadOnlyGuard.Abort e) {
+            assertFalse(e.getMessage(), e.getMessage().contains(vinHex));
+        }
     }
 }

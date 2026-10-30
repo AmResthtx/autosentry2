@@ -241,7 +241,7 @@ public final class DTCReader {
      * Adds a 43/47 payload's codes to {@code codes}. Returns false when the payload
      * isn't a whole reply: odd hex, nothing at all, or fewer codes than a CAN count promised.
      */
-    private static boolean decodePayload(String payload, Set<String> codes) {
+    static boolean decodePayload(String payload, Set<String> codes) {
         if (payload.isEmpty() || payload.length() % 2 != 0) return false;
         int bytes = payload.length() / 2;
         int start = 0;

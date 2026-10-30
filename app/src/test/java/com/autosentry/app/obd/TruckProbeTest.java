@@ -206,4 +206,101 @@ public class TruckProbeTest {
         assertTrue(r.indexOf("SUMMARY") < r.indexOf("ADAPTER"));
         assertTrue(r.indexOf("SUMMARY") > r.indexOf("AUTOSENTRY TRUCK SYSTEMS SCAN"));
     }
+
+    // ---------------------------------------------------------------- review fixes
+
+    @Test
+    public void listenOnlyWontListenUnlessSilenceIsConfirmed() {
+        FakeElm elm = new FakeElm();
+        elm.override("ATIFR0", "?");
+        TruckProbe.Result result = run(elm, options(false));
+        assertFalse("must not monitor", elm.received.contains("ATMA"));
+        assertTrue(result.report, result.report.contains("Listening not started: the adapter didn't confirm ATIFR0"));
+    }
+
+    @Test
+    public void stopWorksOnAQuietBus() {
+        FakeElm elm = new FakeElm();
+        elm.quiet = true;
+        TruckProbe.Options o = options(false);
+        o.listenMs = 30_000;
+        long start = System.currentTimeMillis();
+        ELM327Adapter adapter = new ELM327Adapter(elm.in, elm.out);
+        long[] listeningSince = {0};
+        TruckProbe.Result result = TruckProbe.run(adapter, "test tablet", o, step -> { }, () -> {
+            if (!elm.received.contains("ATMA")) return false; // let it start listening first
+            if (listeningSince[0] == 0) listeningSince[0] = System.currentTimeMillis();
+            return System.currentTimeMillis() - listeningSince[0] > 200;
+        });
+        assertTrue("stopped promptly", System.currentTimeMillis() - start < 5_000);
+        assertEquals(1, elm.stopKeys);
+        assertTrue(result.report, result.report.contains("stopped early by you"));
+    }
+
+    @Test
+    public void trafficHeardBeforeALinkDropIsKept() {
+        FakeElm elm = new FakeElm();
+        elm.dropMonitorAfterMs = 400;
+        TruckProbe.Result result = run(elm, options(false));
+        assertTrue(result.linkLost);
+        assertTrue(result.report, result.report.contains("A84910"));
+        assertTrue(result.report, result.report.contains("MODULES HEARD"));
+    }
+
+    @Test
+    public void bufferOverflowIsReportedPastTheLineCap() {
+        FakeElm elm = new FakeElm();
+        for (int i = 0; i < 25; i++) elm.monitorPrelude.add("<RX ERROR");
+        elm.monitorPrelude.add("BUFFER FULL");
+        TruckProbe.Result result = run(elm, options(false));
+        assertTrue(result.report, result.report.contains("Adapter buffer overflowed: some traffic was missed"));
+    }
+
+    @Test
+    public void troubleCodesAreNoneOnlyWhenConfirmed() {
+        FakeElm elm = new FakeElm();
+        elm.override("03", "NO DATA");
+        String r = run(elm, options(true)).report;
+        assertTrue(r, r.contains("Trouble codes: none found; incomplete: stored (no answer), permanent (no answer)"));
+
+        FakeElm stopped = new FakeElm();
+        stopped.override("010D", "5003");
+        assertTrue(run(stopped, options(true)).report.contains("Trouble codes: not checked"));
+    }
+
+    @Test
+    public void readingsTheScanNeverReachedAreNotCalledMissing() {
+        FakeElm elm = new FakeElm();
+        elm.override("010D", "5003");
+        String r = run(elm, options(true)).report;
+        assertTrue(r, r.matches("(?s).*Advertised but not checked \\(the scan stopped first\\): 0D .*"));
+        assertFalse(r, r.matches("(?s).*this truck doesn't answer: [^\\n]*0D .*"));
+        assertTrue(r, r.contains("Ford PIDs AutoSentry reads, not checked (the scan stopped first): 1310"));
+    }
+
+    @Test
+    public void permanentCodesCheckTheCount() {
+        assertEquals(null, TruckProbe.parsePermanentCodes("4A02\r\r>"));
+        assertEquals(null, TruckProbe.parsePermanentCodes("4A020470\r\r>"));
+        assertEquals("[P0470]", String.valueOf(TruckProbe.parsePermanentCodes("4A010470\r\r>")));
+        assertEquals("[P0470]", String.valueOf(TruckProbe.parsePermanentCodes("4A047000000000\r\r>")));
+        assertEquals("[]", String.valueOf(TruckProbe.parsePermanentCodes("4A00\r\r>")));
+    }
+
+    @Test
+    public void responseTimeLeavesOutTheDebugLog() throws IOException {
+        FakeElm elm = new FakeElm();
+        ELM327Adapter adapter = new ELM327Adapter(elm.in, elm.out);
+        ReadOnlyGuard guard = new ReadOnlyGuard(false, 0, 0, ReadOnlyGuard.SYSTEM_CLOCK);
+        adapter.setGuard(guard);
+        adapter.setTrace((cmd, reply) -> {
+            try {
+                Thread.sleep(300); // a slow log write
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        adapter.readPid(0x0C);
+        assertTrue("got " + guard.lastResponseMs(), guard.lastResponseMs() < 250);
+    }
 }

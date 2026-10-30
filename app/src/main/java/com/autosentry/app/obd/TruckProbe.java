@@ -73,8 +73,14 @@ public final class TruckProbe {
         final Set<String> modules = new LinkedHashSet<>();
         final TreeSet<Integer> supported = new TreeSet<>();
         final TreeSet<Integer> answered = new TreeSet<>();
+        /** Mode 01 PIDs actually asked for; the rest of {@link #supported} wasn't reached. */
+        final TreeSet<Integer> queried = new TreeSet<>();
         final Map<String, Boolean> fordAnswered = new LinkedHashMap<>();
         final List<String> codes = new ArrayList<>();
+        /** Code reads that finished (stored, pending, permanent). */
+        int codeReads = 0;
+        /** Code reads without a clean answer, e.g. "stored (no answer)". */
+        final List<String> codesUnconfirmed = new ArrayList<>();
         final List<String> problems = new ArrayList<>();
         boolean readingsChecked = false;
         int streams = 0;
@@ -84,6 +90,8 @@ public final class TruckProbe {
     private static final long QUERY_MS = 5000L;
     private static final long BUS_WAKE_MS = 15000L;
     private static final long SWEEP_MS = 1500L;
+    /** Stored, pending and permanent. */
+    private static final int CODE_READS = 3;
 
     /** Ford Mode 22 PIDs to try by name beyond the ones AutoSentry reads. */
     private static final String[][] FORD_CANDIDATES = {
@@ -179,13 +187,22 @@ public final class TruckProbe {
         r.line("Modules found", f.modules.isEmpty() ? "none" : String.join(", ", f.modules));
         if (options.active) {
             r.line("Standard readings answered", f.answered.size() + " of " + f.supported.size() + " advertised");
-            r.line("Trouble codes", f.codes.isEmpty() ? "none" : String.join(", ", f.codes));
+            r.line("Trouble codes", codesSummary(f));
         } else {
             r.line("Message streams heard", f.streams);
         }
         r.line("Requests sent to the truck", guard.busFrames().size());
         r.line("Commands refused by the read-only lock", guard.rejected().size());
         return new Result(r.text(), r.json(), linkLost);
+    }
+
+    /** "none" only when every code read got a clean answer; otherwise says what wasn't confirmed. */
+    static String codesSummary(Findings f) {
+        if (f.codeReads == 0) return "not checked (the scan stopped first)";
+        List<String> gaps = new ArrayList<>(f.codesUnconfirmed);
+        if (f.codeReads < CODE_READS) gaps.add("the scan stopped before the rest");
+        String found = f.codes.isEmpty() ? (gaps.isEmpty() ? "none" : "none found") : String.join(", ", f.codes);
+        return gaps.isEmpty() ? found : found + "; incomplete: " + String.join(", ", gaps);
     }
 
     // ---------------------------------------------------------------- shared steps
@@ -222,21 +239,44 @@ public final class TruckProbe {
             return;
         }
         a.rawCommand("ATH1", AT_MS);
-        if (f.protocol.equals("1") || f.protocol.equals("2")) a.rawCommand("ATIFR0", AT_MS);
-        if (isCan(f.protocol)) a.rawCommand("ATCSM1", AT_MS);
+        // Monitoring only stays silent with these on: J1850 must not acknowledge frames, CAN must not ACK.
+        String silence = null;
+        if (f.protocol.equals("1") || f.protocol.equals("2")) silence = "ATIFR0";
+        if (isCan(f.protocol)) silence = "ATCSM1";
+        if (silence != null) {
+            String reply = a.rawCommand(silence, AT_MS);
+            if (!isOk(reply)) {
+                String why = "the adapter didn't confirm " + silence + " (" + oneLine(reply) + ")";
+                r.note("Didn't listen: " + why + ", so it might answer on the bus while monitoring.");
+                f.problems.add("Listening not started: " + why);
+                return;
+            }
+        }
         if (cancel.cancelled()) return;
 
         long seconds = options.listenMs / 1000;
         Movement movement = new Movement(f.protocol);
         long start = System.currentTimeMillis();
         progress.update("Listening for " + seconds + " s (sending nothing)");
-        a.monitor(options.listenMs, (at, line) -> {
-            movement.add(at, line);
-            progress.update(String.format(Locale.US, "Listening: %d of %d s, %d messages heard",
-                    (at - start) / 1000, seconds, movement.total));
-            return !cancel.cancelled();
-        });
-        movement.report(r, f, start, Math.min(System.currentTimeMillis(), start + options.listenMs));
+        try {
+            a.monitor(options.listenMs, (at, line) -> {
+                movement.add(at, line);
+                progress.update(String.format(Locale.US, "Listening: %d of %d s, %d messages heard",
+                        (at - start) / 1000, seconds, movement.total));
+                return !cancel.cancelled();
+            }, cancel::cancelled);
+        } finally {
+            // Whatever was heard before a stop or a dropped link still goes in the report.
+            movement.report(r, f, start, Math.min(System.currentTimeMillis(), start + options.listenMs));
+        }
+    }
+
+    /** True when an adapter setting was accepted: an "OK" line in the reply. */
+    static boolean isOk(String reply) {
+        for (String line : (reply == null ? "" : reply).split("[\\r\\n]+")) {
+            if (line.replace(">", "").trim().equalsIgnoreCase("OK")) return true;
+        }
+        return false;
     }
 
     /** Who's broadcasting what, how often, from a listen-only capture. */
@@ -244,6 +284,8 @@ public final class TruckProbe {
         private final String protocol;
         final Map<String, Stream> streams = new TreeMap<>();
         final List<String> otherLines = new ArrayList<>();
+        int otherLinesDropped = 0;
+        boolean overflowed = false;
         int total = 0;
 
         Movement(String protocol) {
@@ -253,7 +295,9 @@ public final class TruckProbe {
         void add(long at, String raw) {
             String line = raw.replaceAll("\\s", "").toUpperCase(Locale.US);
             if (!line.matches("([0-9A-F]{2})+|[0-9A-F]{3}([0-9A-F]{2})+")) {
+                if (line.contains("BUFFERFULL")) overflowed = true; // checked on every line, kept or not
                 if (otherLines.size() < 20) otherLines.add(raw.trim());
+                else otherLinesDropped++;
                 return;
             }
             int idLength = idLength(protocol);
@@ -313,12 +357,9 @@ public final class TruckProbe {
                     f.problems.add(String.format(Locale.US, "%s went quiet %d ms before the end", s.id, quietAtEnd));
                 }
             }
-            for (String line : otherLines) {
-                r.note("Not a frame: " + line);
-                if (line.toUpperCase(Locale.US).contains("BUFFER FULL")) {
-                    f.problems.add("Adapter buffer overflowed: some traffic was missed");
-                }
-            }
+            for (String line : otherLines) r.note("Not a frame: " + line);
+            if (otherLinesDropped > 0) r.note("... and " + otherLinesDropped + " more lines that weren't frames");
+            if (overflowed) f.problems.add("Adapter buffer overflowed: some traffic was missed");
             f.streams = streams.size();
             r.section("modules", "MODULES HEARD");
             if (f.modules.isEmpty()) r.note("none");
@@ -426,6 +467,7 @@ public final class TruckProbe {
         for (int pid : f.supported) {
             if (cancel.cancelled()) return;
             int[] data = a.readPid(pid);
+            f.queried.add(pid); // only once it got a reply; a request the scan stopped on wasn't checked
             long ms = guard.lastResponseMs();
             if (data != null) f.answered.add(pid);
             else f.problems.add(String.format(Locale.US, "PID %02X advertised but didn't answer", pid));
@@ -462,24 +504,34 @@ public final class TruckProbe {
         String calibration = parseAscii(a.rawCommand("0904", 8000L), "4904");
         r.line("Calibration ID (Mode 09 04)", calibration != null ? calibration : "not reported");
         for (DTCReader.Mode mode : DTCReader.Mode.values()) {
+            if (cancel.cancelled()) return;
             String reply = a.requestTroubleCodes(mode);
-            String header = String.format(Locale.US, "%02X", mode.request + 0x40);
-            List<String> codes = DTCReader.parseCodes(reply, mode);
+            DTCReader.Attempt attempt = DTCReader.classify(reply, mode);
+            String kind = mode.label.toLowerCase(Locale.US);
             String label = mode.label + " codes (Mode " + String.format(Locale.US, "%02X", mode.request) + ")";
-            if (answered(reply, header)) {
-                r.line(label, codes.isEmpty() ? "none" : String.join(", ", codes));
-                for (String code : codes) f.codes.add(code + " (" + mode.label.toLowerCase(Locale.US) + ")");
+            f.codeReads++;
+            if (attempt.reply == DTCReader.Reply.CODES || attempt.reply == DTCReader.Reply.NONE) {
+                r.line(label, attempt.codes.isEmpty() ? "none" : String.join(", ", attempt.codes));
+                for (String code : attempt.codes) f.codes.add(code + " (" + kind + ")");
             } else {
-                r.line(label, "no answer: " + oneLine(reply));
+                String why = attempt.reply == DTCReader.Reply.NO_DATA ? "no answer" : attempt.problem;
+                r.line(label, "not confirmed: " + why + " [" + oneLine(reply) + "]");
+                f.codesUnconfirmed.add(kind + " (" + why + ")");
             }
         }
+        if (cancel.cancelled()) return;
         String permanent = a.rawCommand("0A", QUERY_MS);
-        if (answered(permanent, "4A")) {
-            List<String> codes = parsePermanentCodes(permanent);
-            r.line("Permanent codes (Mode 0A)", codes.isEmpty() ? "none" : String.join(", ", codes));
-            for (String code : codes) f.codes.add(code + " (permanent)");
+        f.codeReads++;
+        List<String> permanentCodes = answered(permanent, "4A") ? parsePermanentCodes(permanent) : null;
+        if (permanentCodes != null) {
+            r.line("Permanent codes (Mode 0A)", permanentCodes.isEmpty() ? "none" : String.join(", ", permanentCodes));
+            for (String code : permanentCodes) f.codes.add(code + " (permanent)");
+        } else if (answered(permanent, "4A")) {
+            r.line("Permanent codes (Mode 0A)", "not confirmed: the answer was cut short [" + oneLine(permanent) + "]");
+            f.codesUnconfirmed.add("permanent (the answer was cut short)");
         } else {
             r.line("Permanent codes (Mode 0A)", "no answer: " + oneLine(permanent) + " (normal before 2010)");
+            f.codesUnconfirmed.add("permanent (no answer)");
         }
         if (cancel.cancelled()) return;
 
@@ -632,11 +684,19 @@ public final class TruckProbe {
         used.retainAll(app);
         TreeSet<Integer> ignored = new TreeSet<>(f.answered);
         ignored.removeAll(app);
+        // Not advertised, or asked and no answer. Advertised but never asked (the scan stopped) is separate.
         TreeSet<Integer> missing = new TreeSet<>(app);
         missing.removeAll(f.answered);
+        TreeSet<Integer> notChecked = new TreeSet<>(missing);
+        notChecked.retainAll(f.supported);
+        notChecked.removeAll(f.queried);
+        missing.removeAll(notChecked);
         r.line("Standard readings the truck answers and AutoSentry uses", pidList(used));
         r.line("Truck answers, AutoSentry ignores", pidList(ignored));
         r.line("AutoSentry can show, this truck doesn't answer", pidList(missing));
+        if (!notChecked.isEmpty()) {
+            r.line("Advertised but not checked (the scan stopped first)", pidList(notChecked));
+        }
         List<String> fordUsed = new ArrayList<>();
         List<String> fordMissing = new ArrayList<>();
         List<String> fordExtra = new ArrayList<>();
@@ -646,8 +706,15 @@ public final class TruckProbe {
             if (appFord.containsKey(e.getKey())) (e.getValue() ? fordUsed : fordMissing).add(label);
             else if (e.getValue()) fordExtra.add(label);
         }
+        List<String> fordNotChecked = new ArrayList<>();
+        for (Map.Entry<String, String> e : appFord.entrySet()) {
+            if (!f.fordAnswered.containsKey(e.getKey())) fordNotChecked.add(e.getKey() + " " + e.getValue());
+        }
         r.line("Ford PIDs AutoSentry reads that answer", fordUsed.isEmpty() ? "none" : String.join(", ", fordUsed));
         r.line("Ford PIDs AutoSentry reads that don't answer", fordMissing.isEmpty() ? "none" : String.join(", ", fordMissing));
+        if (!fordNotChecked.isEmpty()) {
+            r.line("Ford PIDs AutoSentry reads, not checked (the scan stopped first)", String.join(", ", fordNotChecked));
+        }
         r.line("Other Ford PIDs that answer (unused)", fordExtra.isEmpty() ? "none" : String.join(", ", fordExtra));
     }
 
@@ -685,6 +752,10 @@ public final class TruckProbe {
                 adapterOnly.length() == 0 ? "none" : adapterOnly.toString());
         List<String> rejected = guard.rejected();
         r.line("Refused by the read-only lock", rejected.isEmpty() ? "none" : String.valueOf(rejected.size()));
+        List<String> unconfirmed = guard.unconfirmed();
+        if (!unconfirmed.isEmpty()) {
+            r.line("Write failed partway (may or may not have reached the truck)", String.join(", ", unconfirmed));
+        }
         if (!frames.isEmpty()) r.textOnly("  Every request, in order ([header] request):");
         for (String frame : frames) {
             int split = frame.indexOf("] ");
@@ -726,18 +797,16 @@ public final class TruckProbe {
         return text.isEmpty() ? null : text;
     }
 
-    /** Codes from a Mode 0A reply: pairs of bytes after "4A" (a count byte first on CAN), zero pairs skipped. */
+    /**
+     * Codes from a Mode 0A reply: pairs of bytes after "4A" (a count byte first
+     * on CAN), zero pairs skipped. Null when a reply is cut short, such as
+     * fewer codes than a CAN count promised.
+     */
     static List<String> parsePermanentCodes(String reply) {
         Set<String> codes = new LinkedHashSet<>();
         for (String message : DTCReader.splitMessages(reply == null ? "" : reply)) {
             if (!message.startsWith("4A")) continue;
-            String payload = message.substring(2);
-            int start = (payload.length() / 2) % 2 == 1 ? 2 : 0; // CAN: count byte first
-            for (int i = start; i + 4 <= payload.length(); i += 4) {
-                int a = Integer.parseInt(payload.substring(i, i + 2), 16);
-                int b = Integer.parseInt(payload.substring(i + 2, i + 4), 16);
-                if (a != 0 || b != 0) codes.add(DTCReader.decode(a, b));
-            }
+            if (!DTCReader.decodePayload(message.substring(2), codes)) return null;
         }
         return new ArrayList<>(codes);
     }

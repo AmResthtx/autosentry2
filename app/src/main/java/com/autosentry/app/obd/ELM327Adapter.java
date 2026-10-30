@@ -62,6 +62,11 @@ public class ELM327Adapter {
     private volatile ReadOnlyGuard guard = null;
 
     /** Receives each line the adapter hears while monitoring. Return false to stop early. */
+    /** Asked while monitoring; true stops it. */
+    public interface StopCheck {
+        boolean stop();
+    }
+
     public interface LineSink {
         boolean line(long atMs, String line);
     }
@@ -290,20 +295,17 @@ public class ELM327Adapter {
      * Listens with ATMA for {@code ms}, passing every line heard to {@code sink}.
      * The adapter transmits nothing on the bus while monitoring. Any character
      * stops it; a space is used because a bare CR would repeat the last command.
+     * {@code stop} is checked on every pass, so a quiet bus can still be stopped.
      */
-    public synchronized void monitor(long ms, LineSink sink) throws IOException {
+    public synchronized void monitor(long ms, LineSink sink, StopCheck stop) throws IOException {
         if (outputStream == null || inputStream == null) throw new IOException("Not connected to adapter");
-        ReadOnlyGuard g = guard;
-        if (g != null) g.beforeSend("ATMA");
-        drainInput();
-        outputStream.write("ATMA\r".getBytes());
-        outputStream.flush();
+        write("ATMA", guard);
         long deadline = System.currentTimeMillis() + ms;
         StringBuilder partial = new StringBuilder();
         byte[] buffer = new byte[512];
         boolean ended = false; // the adapter stopped on its own (prompt came back)
         try {
-            while (System.currentTimeMillis() < deadline && !ended) {
+            while (System.currentTimeMillis() < deadline && !ended && !stop.stop()) {
                 int available = inputStream.available();
                 if (available <= 0) {
                     sleepBriefly();
@@ -445,27 +447,41 @@ public class ELM327Adapter {
     private String command(String cmd, long timeoutMs) throws IOException {
         ReadOnlyGuard g = guard;
         for (int attempt = 1; ; attempt++) {
-            if (g != null) g.beforeSend(cmd);
-            write(cmd);
+            write(cmd, g);
             String reply = readResponse(timeoutMs);
-            Trace t = trace;
-            if (t != null) t.exchange(cmd, reply);
-            if (g == null || !g.afterReply(cmd, reply, attempt)) return reply;
+            boolean again = false;
+            try {
+                // Checked before the trace logs it, so the response time is the adapter's alone.
+                again = g != null && g.afterReply(cmd, reply, attempt);
+            } finally {
+                Trace t = trace;
+                if (t != null) t.exchange(cmd, reply);
+            }
+            if (!again) return reply;
         }
     }
 
     /** Writes one command. While a guard is installed, anything it refuses is never written. */
     public synchronized void sendCommand(String cmd) throws IOException {
-        ReadOnlyGuard g = guard;
-        if (g != null) g.beforeSend(cmd);
-        write(cmd);
+        write(cmd, guard);
     }
 
-    private void write(String cmd) throws IOException {
+    /**
+     * Checks {@code cmd} with the guard, writes it, and tells the guard it went
+     * out. A write that fails partway is reported to the guard as unconfirmed.
+     */
+    private void write(String cmd, ReadOnlyGuard g) throws IOException {
+        if (g != null) g.beforeSend(cmd);
         if (outputStream == null) throw new IOException("Not connected to adapter");
         drainInput();
-        outputStream.write((cmd + "\r").getBytes());
-        outputStream.flush();
+        try {
+            outputStream.write((cmd + "\r").getBytes());
+            outputStream.flush();
+        } catch (IOException e) {
+            if (g != null) g.writeFailed(cmd);
+            throw e;
+        }
+        if (g != null) g.sent(cmd);
     }
 
     /** Throws away anything left over from a previous timed-out command. */

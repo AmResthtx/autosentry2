@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -97,6 +98,7 @@ public final class ReadOnlyGuard {
     private final long backoffMs;
 
     private final List<String> busFrames = new ArrayList<>();
+    private final List<String> unconfirmed = new ArrayList<>();
     private final Map<String, Integer> adapterCommands = new LinkedHashMap<>();
     private final List<String> rejected = new ArrayList<>();
     private final List<String> problems = new ArrayList<>();
@@ -127,22 +129,17 @@ public final class ReadOnlyGuard {
     /**
      * Checks a command before it's written. Refused commands throw
      * {@link Blocked} and are recorded; allowed bus requests wait out the
-     * pacing interval and are recorded with the header they go out under.
+     * pacing interval. Nothing is recorded as sent until {@link #sent} says
+     * the write went through.
      */
     public synchronized void beforeSend(String command) throws IOException {
-        String cmd = command == null ? "" : command.replace(" ", "").toUpperCase(Locale.US);
+        String cmd = normalize(command);
         if (cmd.isEmpty() || !cmd.matches("[0-9A-Z@]+")) {
             // An empty line repeats the last command on an ELM327, and CR/LF could smuggle in a second one.
             reject(command, "not a single plain command");
         }
-        if (cmd.startsWith("AT") || cmd.startsWith("ST")) {
+        if (isAdapterCommand(cmd)) {
             if (!adapterAllowed(cmd)) reject(cmd, "adapter command isn't on the read-only list");
-            if (cmd.startsWith("ATSH")) header = cmd.substring(4);
-            if (cmd.equals("ATH0")) headersOn = false;
-            if (cmd.equals("ATH1")) headersOn = true;
-            Integer n = adapterCommands.get(cmd);
-            adapterCommands.put(cmd, n == null ? 1 : n + 1);
-            sentAt = clock.now();
             return;
         }
         if (!cmd.matches("([0-9A-F]{2})+")) reject(cmd, "not a hex request");
@@ -154,8 +151,33 @@ public final class ReadOnlyGuard {
         long wait = lastBusSend + minIntervalMs - clock.now();
         if (wait > 0) clock.sleep(wait);
         lastBusSend = clock.now();
-        sentAt = lastBusSend;
+    }
+
+    /**
+     * The adapter wrote {@code command} out: record it (bus requests with the
+     * header they went out under) and start its response timer.
+     */
+    public synchronized void sent(String command) {
+        String cmd = normalize(command);
+        sentAt = clock.now();
+        if (isAdapterCommand(cmd)) {
+            if (cmd.startsWith("ATSH")) header = cmd.substring(4);
+            if (cmd.equals("ATH0")) headersOn = false;
+            if (cmd.equals("ATH1")) headersOn = true;
+            Integer n = adapterCommands.get(cmd);
+            adapterCommands.put(cmd, n == null ? 1 : n + 1);
+            return;
+        }
         busFrames.add("[" + header + "] " + cmd);
+    }
+
+    /**
+     * Writing {@code command} failed partway, so some of it may have reached
+     * the adapter. Kept apart from the requests that were sent.
+     */
+    public synchronized void writeFailed(String command) {
+        String cmd = normalize(command);
+        if (!isAdapterCommand(cmd)) unconfirmed.add("[" + header + "] " + cmd);
     }
 
     /**
@@ -166,12 +188,14 @@ public final class ReadOnlyGuard {
      */
     public synchronized boolean afterReply(String command, String reply, int attempt) throws IOException {
         lastResponseMs = clock.now() - sentAt;
-        String cmd = command.replace(" ", "").toUpperCase(Locale.US);
+        String cmd = normalize(command);
         if (cmd.equals("ATDPN")) protocol = TruckProbe.protocolNumber(reply);
-        if (cmd.startsWith("AT") || cmd.startsWith("ST")) return false;
+        if (isAdapterCommand(cmd)) return false;
 
         int service = Integer.parseInt(cmd.substring(0, 2), 16);
-        String positive = String.format(Locale.US, "%02X", service + 0x40);
+        // A positive reply repeats the service + 0x40 and the PID/DID (or subfunction) it answers.
+        int echo = Math.min(echoLength(service), cmd.length() - 2);
+        String positive = String.format(Locale.US, "%02X", service + 0x40) + cmd.substring(2, 2 + echo);
         String negative = String.format(Locale.US, "7F%02X", service);
         boolean answered = false;
         boolean pending = false;
@@ -187,19 +211,26 @@ public final class ReadOnlyGuard {
                     answered = true;
                 }
             } else {
-                throw new Abort("unexpected reply to " + cmd + ": " + data);
+                // The VIN reply's data never goes into the report unasked.
+                throw new Abort("unexpected reply to " + cmd + ": "
+                        + (isVinRequest(cmd) ? "(VIN reply, not shown)" : data));
             }
         }
+        Set<String> errorsSeen = new LinkedHashSet<>();
         for (String line : (reply == null ? "" : reply).split("[\\r\\n]+")) {
             String upper = line.toUpperCase(Locale.US);
             for (String error : BUS_ERRORS) {
-                if (upper.contains(error)) busError = true;
+                if (upper.contains(error)) {
+                    busError = true;
+                    errorsSeen.add(error.replace("<", ""));
+                }
             }
             if (upper.contains("BUFFER FULL")) problems.add("Adapter buffer overflowed during " + cmd);
         }
         if (busError) {
             busErrors++;
-            problems.add("Bus error on " + cmd + " (" + TruckProbe.oneLine(reply) + ")");
+            // Only the error names: the rest of the reply can hold data (a VIN, for one).
+            problems.add("Bus error on " + cmd + " (" + String.join(", ", errorsSeen) + ")");
             if (busErrors >= MAX_BUS_ERRORS) throw new Abort(busErrors + " bus errors; stopped so the bus can settle");
             backOff();
             return !answered && attempt < MAX_ATTEMPTS;
@@ -213,6 +244,34 @@ public final class ReadOnlyGuard {
             return true;
         }
         return false;
+    }
+
+    private static String normalize(String command) {
+        return command == null ? "" : command.replace(" ", "").toUpperCase(Locale.US);
+    }
+
+    private static boolean isAdapterCommand(String cmd) {
+        return cmd.startsWith("AT") || cmd.startsWith("ST");
+    }
+
+    static boolean isVinRequest(String cmd) {
+        return cmd.startsWith("0902");
+    }
+
+    /**
+     * Hex digits after the service byte that a positive reply repeats: the
+     * PID (01, 09), PID and frame (02), DID (22) or subfunction (19). Code
+     * requests (03, 07, 0A) have nothing to repeat.
+     */
+    private static int echoLength(int service) {
+        switch (service) {
+            case 0x01: case 0x09: case 0x19:
+                return 2;
+            case 0x02: case 0x22:
+                return 4;
+            default:
+                return 0;
+        }
     }
 
     /** The data part of each frame in a reply: headers stripped, status lines and continuation frames skipped. */
@@ -284,6 +343,11 @@ public final class ReadOnlyGuard {
     /** Every request sent to the truck, in order, with the header it went out under. */
     public synchronized List<String> busFrames() {
         return new ArrayList<>(busFrames);
+    }
+
+    /** Requests whose write failed partway, so they may or may not have reached the truck. */
+    public synchronized List<String> unconfirmed() {
+        return new ArrayList<>(unconfirmed);
     }
 
     /** Adapter-only commands (never reach the truck) and how many times each was sent. */

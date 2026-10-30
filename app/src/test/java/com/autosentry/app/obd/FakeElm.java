@@ -26,6 +26,12 @@ final class FakeElm {
     final List<String> busRequests = new ArrayList<>();
     /** Bytes written while monitoring (the stop key), which aren't commands. */
     int stopKeys = 0;
+    /** No broadcast traffic while monitoring. */
+    boolean quiet = false;
+    /** While monitoring, the link drops this many ms in; -1 never. */
+    long dropMonitorAfterMs = -1;
+    /** Lines sent first when monitoring starts. */
+    final List<String> monitorPrelude = new ArrayList<>();
 
     private final Map<String, Deque<String>> overrides = new HashMap<>();
     private final StringBuilder pending = new StringBuilder();
@@ -51,8 +57,12 @@ final class FakeElm {
 
     final InputStream in = new InputStream() {
         @Override
-        public int available() {
+        public int available() throws java.io.IOException {
             synchronized (FakeElm.this) {
+                if (monitoring && dropMonitorAfterMs >= 0
+                        && System.currentTimeMillis() - monitorStart >= dropMonitorAfterMs) {
+                    throw new java.io.IOException("link lost");
+                }
                 pump();
                 return pending.length();
             }
@@ -119,9 +129,11 @@ final class FakeElm {
     }
 
     private String reply(String cmd) {
-        if (cmd.startsWith("AT") || cmd.startsWith("ST")) return adapter(cmd);
-        busRequests.add("[" + header + "] " + cmd);
         Deque<String> queue = overrides.get(cmd);
+        if (cmd.startsWith("AT") || cmd.startsWith("ST")) {
+            return queue != null && !queue.isEmpty() ? queue.poll() : adapter(cmd);
+        }
+        busRequests.add("[" + header + "] " + cmd);
         if (queue != null && !queue.isEmpty()) return queue.poll();
         String data = truck(cmd);
         if (data == null) return "NO DATA";
@@ -149,6 +161,7 @@ final class FakeElm {
                 nextA = 0;
                 nextB = 0;
                 sporadic1 = sporadic2 = false;
+                for (String l : monitorPrelude) pending.append(l).append('\r');
                 return null; // no prompt while monitoring
             default:
                 if (cmd.startsWith("ATSH")) header = cmd.substring(4);
@@ -201,7 +214,7 @@ final class FakeElm {
 
     /** While monitoring, adds every broadcast frame that's due. */
     private void pump() {
-        if (!monitoring) return;
+        if (!monitoring || quiet) return;
         long t = System.currentTimeMillis() - monitorStart;
         while (nextA <= t) {
             if (nextA < 300 || nextA >= 650) pending.append("A829101234").append(String.format(Locale.US, "%02X", (int) (nextA / 50) & 0xFF)).append("5D\r");

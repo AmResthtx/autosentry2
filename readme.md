@@ -7,8 +7,8 @@ live data automatically. You do not have to remember to open an app before
 driving. Review the trip and truck data later, with the truck off.
 
 AutoSentry is built to catch problems before they become expensive repairs. It
-tracks maintenance intervals so you do not have to, and its long-term plan is
-to offer a good deal on the parts for a service that is coming due.
+tracks maintenance intervals so you do not have to, and shows parts for
+scheduled service that is coming due.
 
 Your vehicle data stays on your device by default. The app currently has no
 Android `INTERNET` permission.
@@ -33,22 +33,24 @@ AutoSentry stores vehicle and service data on the device. Monitoring does not
 require an account or cloud service, and the app currently has no Android
 `INTERNET` permission.
 
-Any future network features, including optional anonymous PID-coverage
-sharing or parts deals, will be opt-in and off by default. The privacy
-information will be updated before any such feature ships.
+Parts offers appear on the optional Deals tab, and links open in your browser.
+Any future network feature, including anonymous PID-coverage sharing, will be
+opt-in and off by default. The privacy information will be updated before any
+such feature ships.
 
 ## What AutoSentry does
 
 - **Tracks trips automatically.** After setup, AutoSentry checks for the truck,
   connects to the paired adapter, records the trip, and monitors live data.
-  You can review the saved information later without opening the app before
-  each drive.
+  You do not need to open the app before each drive.
 - **Helps catch problems early.** The dashboard shows available live readings.
-  Checks include trouble-code reads and a read-only Truck Systems scan.
+  The Checks tab includes trouble-code reads and a read-only Truck Systems scan.
 - **Tracks maintenance.** The service schedule and alerts help keep maintenance
   from slipping through the cracks. The service log keeps local records.
 - **Builds an ownership record.** Trip and service records help document care
   of this specific truck over time.
+- **Shows parts for service.** The Deals tab matches offers to scheduled jobs
+  that are due soon or overdue. It does not use trouble codes to choose offers.
 
 AutoSentry is designed around the 2000 F-250 7.3L Power Stroke. Truck and
 adapter responses vary, so readings are identified by what the truck actually
@@ -79,7 +81,7 @@ Different trucks may answer different requests.
 - **`--`:** A supported PID had no usable reading at that moment. This is a
   temporary missing value, not proof that the truck does not support it.
 - **Unverified:** An experimental Ford PID that has not been confirmed on the
-  truck. It is labeled **Unverified** and does not drive alerts or severity.
+  truck. It is labeled as unverified and does not drive alerts or severity.
 
 ## Data labels
 
@@ -105,15 +107,16 @@ The free plan includes:
 ### Paid add-on
 
 The resale report is a separate paid add-on, on top of the free plan. It is
-intended as a one-time purchase, not a subscription. It is not part of the free
-tier, and the purchase feature is not available yet.
+intended as a one-time purchase, not a subscription. The report and purchase
+feature are not available yet.
 
 ### Parts deals
 
-Parts deals are opt-in. They will only be offered with the owner's permission,
-as clearly labeled placements tied to a scheduled service item. They will
-never appear next to trouble codes. Deals are part of the future plan and are
-not available yet.
+The Deals tab is optional: you choose whether to view offers or open their
+links. Offers appear only under a scheduled service item that is due soon or
+overdue, never next to trouble codes. Paid placements are labeled **Sponsored**;
+commission links are labeled **Affiliate link**. Links open in the browser, not
+inside AutoSentry.
 
 ## Supporting the project
 
@@ -130,15 +133,16 @@ Priorities:
    updated and make backups dependable.
 2. **Complete maintenance alerts.** Alert on every scheduled item by miles,
    engine hours, and time.
-3. **Codes verified on the truck.** Retry reads where appropriate. A failed
-   read must always be reported as failed; show “no codes” only after the
-   truck has answered.
+3. **Codes verified on the truck.** Reads are retried, and failed reads are
+   reported as failures; show “no codes” only when the truck answered. Verify
+   this behavior on the 2000 F-250 7.3L.
 
 ## Honest status
 
 Trouble-code reads and clear-codes have not been tested on the truck yet.
-Treat them as unverified until they are checked on a real 2000 F-250 7.3L.
-Experimental Ford PIDs, including MFDES, are also unverified.
+Although failed reads are retried and reported as failures, verify these
+features on a real 2000 F-250 7.3L before relying on them. Experimental Ford
+PIDs, including MFDES, are also unverified.
 
 ## How it works
 

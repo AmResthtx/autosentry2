@@ -146,6 +146,8 @@ public class TrackingService extends Service {
     private KoeoReport koeo;
     private boolean koeoDue = false;
     private long crankStart = 0;
+    // When a code read saw the starter turn and stopped; 0 when it didn't.
+    private long crankSeenAt = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
     private long lastIcpRead = 0;
@@ -679,7 +681,10 @@ public class TrackingService extends Service {
     private void trackKeyOnAndCrank(long now, Double rpm, boolean engineRunning) throws IOException {
         if (koeoDue) {
             koeoDue = false;
-            if (!engineRunning) captureKoeo(now); // already running = joined mid-drive, nothing to capture
+            if (!engineRunning) { // already running = joined mid-drive, nothing to capture
+                captureKoeo(now);
+                return; // this tick's RPM is older than the snapshot; the next tick picks up any crank
+            }
         }
         if (koeo == null || koeo.started || rpm == null) return; // no RPM answer this tick: no information
         if (rpm > 0 && rpm < STARTED_RPM) {
@@ -721,19 +726,22 @@ public class TrackingService extends Service {
             if (!Double.isNaN(c)) text.append(oil.label()).append(": ").append(oil.formatValue(c * 9.0 / 5.0 + 32.0)).append('\n');
         }
         r.readings = text.toString().trim();
-        r.storedCodes = readCodes(DTCReader.Mode.STORED);
-        r.pendingCodes = readCodes(DTCReader.Mode.PENDING);
+        DTCReader.CodeRead codes = readTroubleCodes(true);
+        r.setCodes(codes.stored);
+        r.setCodes(codes.pending);
+        crankStart = 0;
+        if (codes.stoppedBecause != null) {
+            // The starter turned mid-read: this crank is timed from when it was seen, and the
+            // codes wait for the read after the engine starts.
+            r.crankAttempts = 1;
+            crankStart = crankSeenAt;
+            autoScanPending = true;
+        }
         r.id = db.koeoReportDao().insert(r);
         koeo = r;
-        crankStart = 0;
+        // The same read is the Checks tab's scan for this key cycle, so the truck is asked once.
+        if (codes.stoppedBecause == null) publishScan(DiagnosticCodes.Scan.of(System.currentTimeMillis(), codes));
         AppLog.i(this, TAG, "Key-on check:\n" + r.summary());
-    }
-
-    /** Comma-separated codes, "" for none, null when the request itself got no reply. */
-    private String readCodes(DTCReader.Mode mode) throws IOException {
-        String raw = realAdapter.requestTroubleCodes(mode);
-        if (raw.trim().isEmpty() || !raw.contains(">")) return null; // timed out
-        return android.text.TextUtils.join(",", DTCReader.parseCodes(raw, mode));
     }
 
     /** Saves the open KOEO report as it stands and closes it. */
@@ -852,6 +860,9 @@ public class TrackingService extends Service {
 
     /** Runs a scan or clear the Checks tab asked for, or the automatic scan after connecting. */
     private void handleCodeRequest() throws IOException {
+        // The key-on check reads codes itself, and a crank is timed before anything else;
+        // whatever was asked stays queued for a later poll.
+        if (codeReadWouldDelayCrank()) return;
         DiagnosticCodes.Request request = DiagnosticCodes.take();
         if (request == DiagnosticCodes.Request.NONE && autoScanPending) request = DiagnosticCodes.Request.SCAN;
         autoScanPending = false;
@@ -860,16 +871,7 @@ public class TrackingService extends Service {
         DiagnosticCodes.busy = true;
         try {
             if (request == DiagnosticCodes.Request.CLEAR) {
-                // Ford's procedure is key on, engine off; the PCM may ignore a clear while running.
-                if (LiveReadings.engineRunning) {
-                    DiagnosticCodes.message = "Shut the engine off and leave the key on, then clear the codes.";
-                    return;
-                }
-                boolean cleared = realAdapter.clearTroubleCodes();
-                AppLog.i(this, TAG, cleared ? "Trouble codes cleared" : "Clear codes: truck didn't confirm");
-                scanCodes();
-                DiagnosticCodes.message = cleared ? "Codes cleared."
-                        : "The truck didn't confirm the clear. Check that the key is on and the engine is off.";
+                clearCodes();
             } else {
                 scanCodes();
             }
@@ -881,20 +883,116 @@ public class TrackingService extends Service {
         }
     }
 
+    /** True while reading codes would hold up the key-on check or the timing of a crank. */
+    private boolean codeReadWouldDelayCrank() {
+        Double rpm = LiveReadings.values.get(PidCatalog.RPM);
+        return koeoDue || crankLog != null || crankStart != 0 || (rpm != null && rpm > 0 && rpm < STARTED_RPM);
+    }
+
     private void scanCodes() throws IOException {
-        List<String> stored = DTCReader.parseCodes(
-                realAdapter.requestTroubleCodes(DTCReader.Mode.STORED), DTCReader.Mode.STORED);
-        List<String> pending = DTCReader.parseCodes(
-                realAdapter.requestTroubleCodes(DTCReader.Mode.PENDING), DTCReader.Mode.PENDING);
-        DTCReader.MilStatus mil = supportedPids.contains(0x01)
-                ? DTCReader.parseMilStatus(realAdapter.readPid(0x01)) : null;
-        DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.of(System.currentTimeMillis(),
-                mil == null ? null : mil.milOn, stored, pending);
+        DTCReader.CodeRead read = readTroubleCodes(!LiveReadings.engineRunning);
+        if (read.stoppedBecause != null) {
+            DiagnosticCodes.message = "The engine started before the codes could be read. They'll be read once it's running.";
+            autoScanPending = true;
+            return;
+        }
+        publishScan(DiagnosticCodes.Scan.of(System.currentTimeMillis(), read));
+    }
+
+    /**
+     * Mode 04, but only from a fresh read that worked: the codes and light state as
+     * they are right now are saved first, so clearing never destroys the evidence.
+     */
+    private void clearCodes() throws IOException {
+        // Ford's procedure is key on, engine off; the PCM may ignore a clear while running.
+        if (LiveReadings.engineRunning) {
+            DiagnosticCodes.message = "Shut the engine off and leave the key on, then clear the codes.";
+            return;
+        }
+        DTCReader.CodeRead read = readTroubleCodes(true);
+        if (read.stoppedBecause != null) {
+            DiagnosticCodes.message = "The engine started, so nothing was cleared.";
+            autoScanPending = true;
+            return;
+        }
+        DiagnosticCodes.Scan before = DiagnosticCodes.Scan.of(System.currentTimeMillis(), read);
+        publishScan(before);
+        if (!before.succeeded()) {
+            DiagnosticCodes.message = "Couldn't read the codes first, so nothing was cleared. "
+                    + "Try again with the key on and the engine off.";
+            return;
+        }
+        if (before.codes.isEmpty() && !Boolean.TRUE.equals(before.milOn)) {
+            DiagnosticCodes.message = "The truck has no codes to clear.";
+            return;
+        }
+        DiagnosticCodes.beforeClear = AppSettings.addCodesBeforeClear(this, before);
+        AppLog.i(this, TAG, "Codes before clearing (saved): stored " + before.stored.logText()
+                + ", pending " + before.pending.logText() + ", check engine light "
+                + (before.milOn == null ? "unknown" : (before.milOn ? "on" : "off")));
+
+        boolean cleared = realAdapter.clearTroubleCodes();
+        AppLog.i(this, TAG, cleared ? "Trouble codes cleared" : "Clear codes: truck didn't confirm");
+        scanCodes();
+        DiagnosticCodes.message = cleared ? "Codes cleared. The codes from before are saved below."
+                : "The truck didn't confirm the clear. Check that the key is on and the engine is off.";
+    }
+
+    /** Shows a finished read on the Checks tab and saves it, so a failed read stays failed across restarts. */
+    private void publishScan(DiagnosticCodes.Scan scan) {
         DiagnosticCodes.lastScan = scan;
         DiagnosticCodes.message = null;
         AppSettings.setLastCodeScan(this, scan);
-        AppLog.i(this, TAG, "Trouble codes: stored " + stored + ", pending " + pending
-                + ", check engine light " + (mil == null ? "unknown" : (mil.milOn ? "on" : "off")));
+        autoScanPending = false;
+        AppLog.i(this, TAG, "Trouble codes: stored " + scan.stored.logText() + ", pending " + scan.pending.logText()
+                + ", check engine light " + (scan.milOn == null ? "unknown" : (scan.milOn ? "on" : "off")));
+    }
+
+    /**
+     * Light state, stored and pending codes, each retried (see DTCReader.readAll).
+     * {@code watchCrank} checks RPM between tries and stops if the starter turns,
+     * so a retry never holds up timing a crank. Every exchange goes in the debug log.
+     */
+    private DTCReader.CodeRead readTroubleCodes(boolean watchCrank) throws IOException {
+        crankSeenAt = 0;
+        ELM327Adapter.Trace previous = realAdapter.getTrace();
+        realAdapter.setTrace(adapterTrace);
+        try {
+            return DTCReader.readAll(new DTCReader.Link() {
+                @Override
+                public String requestCodes(DTCReader.Mode mode) throws IOException {
+                    return realAdapter.requestTroubleCodes(mode);
+                }
+
+                @Override
+                public int[] readPid01() throws IOException {
+                    return realAdapter.readPid(0x01);
+                }
+
+                @Override
+                public String pauseBeforeRetry() throws IOException {
+                    return pauseBetweenCodeReads(watchCrank);
+                }
+            }, supportedPids.contains(0x01));
+        } finally {
+            realAdapter.setTrace(previous);
+        }
+    }
+
+    /** Waits out the gap before another try; returns ENGINE_STARTED instead when the engine turned meanwhile. */
+    private String pauseBetweenCodeReads(boolean watchCrank) throws IOException {
+        try {
+            Thread.sleep(DTCReader.RETRY_GAP_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted between code reads");
+        }
+        if (!watchCrank || !supportedPids.contains(PidCatalog.RPM)) return null;
+        double rpm = PidCatalog.get(PidCatalog.RPM).decode(realAdapter.readPid(PidCatalog.RPM));
+        if (!(rpm > 0)) return null;
+        crankSeenAt = System.currentTimeMillis();
+        LiveReadings.values.put(PidCatalog.RPM, rpm); // holds off the next automatic read until the crank is over
+        return DTCReader.ENGINE_STARTED;
     }
 
     private void handleLinkLoss() {

@@ -24,6 +24,8 @@ public final class AppSettings {
     private static final String KEY_TRACKING_START = "maintenance_tracking_start";
     private static final String KEY_HIDDEN_SERVICES = "hidden_service_items";
     private static final String KEY_LAST_CODE_SCAN = "last_code_scan";
+    private static final String KEY_CODES_BEFORE_CLEAR = "codes_before_clear";
+    private static final int CODES_BEFORE_CLEAR_KEPT = 5;
     private static final String KEY_ALERT_STAGE_PREFIX = "service_alert_stage_";
     private static final String KEY_ALERT_TIME_PREFIX = "service_alert_time_";
     // Set once Trip Time has been put on a saved dashboard (or the user saved their own).
@@ -186,6 +188,30 @@ public final class AppSettings {
 
     public static void setLastCodeScan(Context context, DiagnosticCodes.Scan scan) {
         prefs(context).edit().putString(KEY_LAST_CODE_SCAN, scan.serialize()).apply();
+    }
+
+    /** The codes as they were just before each clear, newest first, so clearing never loses them. */
+    public static List<DiagnosticCodes.Scan> getCodesBeforeClear(Context context) {
+        List<DiagnosticCodes.Scan> scans = new ArrayList<>();
+        for (String line : prefs(context).getString(KEY_CODES_BEFORE_CLEAR, "").split("\n")) {
+            DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.deserialize(line);
+            if (scan != null) scans.add(scan);
+        }
+        return scans;
+    }
+
+    /** Saves a scan taken right before a clear; keeps the last CODES_BEFORE_CLEAR_KEPT. Written at once, before Mode 04 goes out. */
+    public static List<DiagnosticCodes.Scan> addCodesBeforeClear(Context context, DiagnosticCodes.Scan scan) {
+        List<DiagnosticCodes.Scan> scans = getCodesBeforeClear(context);
+        scans.add(0, scan);
+        while (scans.size() > CODES_BEFORE_CLEAR_KEPT) scans.remove(scans.size() - 1);
+        StringBuilder sb = new StringBuilder();
+        for (DiagnosticCodes.Scan s : scans) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(s.serialize());
+        }
+        prefs(context).edit().putString(KEY_CODES_BEFORE_CLEAR, sb.toString()).commit();
+        return scans;
     }
 
     private static List<Integer> parseIds(String stored) {

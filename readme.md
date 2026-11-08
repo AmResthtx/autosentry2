@@ -135,7 +135,13 @@ a setup wizard, and a key-on check with crank timing on every start.
     phone today.
 11. **Real MPG on the 7.3L.** The truck has no MAF sensor and likely doesn't
     answer the standard fuel-rate PID, so MPG needs Ford's fuel-quantity
-    PID (MFDES, experimental in the PID catalog) instead.
+    PID (MFDES, experimental in the PID catalog) instead. Until then, the Fuel
+    Log (History > Fuel Log) estimates MPG from pump fill-ups. Enter every
+    partial fill and close the interval with a full fill. For a past fill-up,
+    select the trip immediately after it to prefill the approximate date and
+    odometer; verify both against your records. A trip's first GPS point can be
+    opened in a map app, but it may not be the station. No calibration factor
+    is applied to live MPG.
 
 ## Roadmap
 
@@ -171,6 +177,7 @@ maintenance/    ServiceInterval, ServiceStatus, MaintenanceScheduleEngine,
                 ServiceAlertPolicy
                 — vehicle service intervals and due-soon/overdue tracking
 fuel/           MpgCalculator — MAF + GPS speed -> instantaneous/interval MPG
+                FuelEconomy — true MPG per tank from logged fill-ups
 gps/            GpsTracker — LocationManager wrapper, no Play Services dependency
 service/        TrackingService — foreground OBD + GPS persistence and notifications
 service/        TrackingWatchdogWorker — restarts tracking if the system killed it

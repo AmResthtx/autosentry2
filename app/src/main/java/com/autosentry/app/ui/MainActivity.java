@@ -122,7 +122,7 @@ public class MainActivity extends AppCompatActivity {
     private List<DiagnosticCodes.Scan> savedBeforeClear = Collections.emptyList();
     private ImageButton buttonEditDashboard, buttonToggleTracking;
     private Button buttonResetOil,
-            buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
+            buttonLogMaintenance, buttonMaintenanceHistory, buttonFuelLog, buttonPairAdapter, buttonAutoTrackingToggle,
             buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
             buttonSaveTrips, buttonSystemsScan, buttonScanCodes, buttonClearCodes;
 
@@ -168,6 +168,7 @@ public class MainActivity extends AppCompatActivity {
         buttonResetOil = findViewById(R.id.buttonResetOil);
         buttonLogMaintenance = findViewById(R.id.buttonLogMaintenance);
         buttonMaintenanceHistory = findViewById(R.id.buttonMaintenanceHistory);
+        buttonFuelLog = findViewById(R.id.buttonFuelLog);
         buttonPairAdapter = findViewById(R.id.buttonPairAdapter);
         buttonSetupWizard = findViewById(R.id.buttonSetupWizard);
         buttonAutoTrackingToggle = findViewById(R.id.buttonAutoTrackingToggle);
@@ -208,6 +209,7 @@ public class MainActivity extends AppCompatActivity {
         buttonResetOil.setOnClickListener(v -> resetOilLife());
         buttonLogMaintenance.setOnClickListener(v -> startActivity(new Intent(this, LogMaintenanceActivity.class)));
         buttonMaintenanceHistory.setOnClickListener(v -> startActivity(new Intent(this, MaintenanceHistoryActivity.class)));
+        buttonFuelLog.setOnClickListener(v -> startActivity(new Intent(this, FuelLogActivity.class)));
         buttonPairAdapter.setOnClickListener(v -> pickObdAdapter());
         buttonSetupWizard.setOnClickListener(v -> startActivity(new Intent(this, SetupWizardActivity.class)));
         buttonAutoTrackingToggle.setOnClickListener(v -> toggleAutoTracking());

@@ -19,9 +19,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         TripPoint.class,
         MaintenanceEvent.class,
         MaintenanceAttachment.class,
-        KoeoReport.class
+        KoeoReport.class,
+        FuelFillUp.class
     },
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 public abstract class AppDatabase extends RoomDatabase {
@@ -33,6 +34,7 @@ public abstract class AppDatabase extends RoomDatabase {
     public abstract MaintenanceDao maintenanceDao();
     public abstract MaintenanceAttachmentDao maintenanceAttachmentDao();
     public abstract KoeoReportDao koeoReportDao();
+    public abstract FuelFillUpDao fuelFillUpDao();
 
     /**
      * Adds photo-attachment support without wiping data. This tablet has a
@@ -94,6 +96,23 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /** Adds the pump fill-up log used for true MPG. */
+    static final Migration MIGRATION_4_5 = new Migration(4, 5) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS fuel_fillups (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "timestamp INTEGER NOT NULL, " +
+                "odometerMiles REAL NOT NULL, " +
+                "gallons REAL NOT NULL, " +
+                "fullTank INTEGER NOT NULL, " +
+                "pricePerGallon REAL NOT NULL, " +
+                "estimatedTotalGallons REAL NOT NULL)"
+            );
+        }
+    };
+
     static final String UNCONFIRMED_NONE =
             "none, not confirmed: read once by an older version that couldn't tell no codes from no answer";
 
@@ -117,7 +136,7 @@ public abstract class AppDatabase extends RoomDatabase {
                             context.getApplicationContext(),
                             AppDatabase.class,
                             "autosentry.db"
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build();
                 }
             }
         }

@@ -12,7 +12,8 @@ import java.util.regex.Pattern;
 
 /**
  * Turns ELM327 replies to Mode 03 (stored) and Mode 07 (pending) trouble-code
- * requests into codes like "P1211", and describes them from the 7.3L list.
+ * requests, and Ford's service 13 (continuous memory) on J1850 PWM, into codes
+ * like "P1211", and describes them from the 7.3L list.
  *
  * The adapter runs with spaces and headers off, so a reply is one run of hex
  * per line. Two layouts exist:
@@ -147,19 +148,22 @@ public final class DTCReader {
         String pauseBeforeRetry() throws IOException;
     }
 
-    /** One full read: check engine light, stored codes, pending codes. */
+    /** One full read: check engine light, stored codes, pending codes, and Ford's memory codes. */
     public static final class CodeRead {
         /** Null when PID 01 isn't supported or didn't answer. */
         public final MilStatus mil;
         public final Result stored;
         public final Result pending;
+        /** Ford continuous-memory codes; null when not asked (not a J1850 PWM Ford). */
+        public final Result memory;
         /** Why the read stopped early (ENGINE_STARTED); null when it ran to the end. */
         public final String stoppedBecause;
 
-        CodeRead(MilStatus mil, Result stored, Result pending, String stoppedBecause) {
+        CodeRead(MilStatus mil, Result stored, Result pending, Result memory, String stoppedBecause) {
             this.mil = mil;
             this.stored = stored;
             this.pending = pending;
+            this.memory = memory;
             this.stoppedBecause = stoppedBecause;
         }
     }
@@ -168,7 +172,15 @@ public final class DTCReader {
         STORED(0x03, 'S', "Stored",
                 "Confirmed fault. If the check engine light is on, this is why."),
         PENDING(0x07, 'P', "Pending",
-                "Seen once but not confirmed. It turns the check engine light on if it happens again.");
+                "Seen once but not confirmed. It turns the check engine light on if it happens again."),
+        /**
+         * Ford service 13, sent straight to the PCM on J1850 PWM. Generic Mode 03 only
+         * returns codes that turn the check engine light on; the 7.3L keeps most of its
+         * faults here instead.
+         */
+        FORD_MEMORY(0x13, 'M', "Ford memory",
+                "Saved by the truck's own constant self-checks. Many 7.3L faults show up only here, "
+                        + "with the check engine light off.");
 
         public final int request;
         final char key;
@@ -402,13 +414,14 @@ public final class DTCReader {
     }
 
     /**
-     * Reads the check engine light, then stored, then pending codes, retrying
-     * NO DATA and failures up to MAX_ATTEMPTS times each with a pause between.
+     * Reads the check engine light, then stored, then pending codes, then (when
+     * {@code fordMemory}) Ford's continuous-memory codes, retrying NO DATA and
+     * failures up to MAX_ATTEMPTS times each with a pause between.
      * An answer ends a mode at once, so a normal read is one request per mode.
      * If a pause says stop (the engine started), the read ends there and
      * everything still unread is FAILED with that reason.
      */
-    public static CodeRead readAll(Link link, boolean pid01Supported) throws IOException {
+    public static CodeRead readAll(Link link, boolean pid01Supported, boolean fordMemory) throws IOException {
         String stop = null;
         MilStatus mil = null;
         if (pid01Supported) {
@@ -431,7 +444,17 @@ public final class DTCReader {
         if (stop == null) stop = attempt(Mode.PENDING, link, 0, pendingTries);
         Result pending = stop == null ? decide(Mode.PENDING, pendingTries, mil, pcmAnswered)
                 : stopped(Mode.PENDING, pendingTries, stop);
-        return new CodeRead(mil, stored, pending, stop);
+
+        Result memory = null;
+        if (fordMemory) {
+            // NO DATA here never counts as none: it's sent to a different address than
+            // Mode 03/07, so silence may only mean the request didn't reach the PCM.
+            List<Attempt> memoryTries = new ArrayList<>();
+            if (stop == null) stop = attempt(Mode.FORD_MEMORY, link, 0, memoryTries);
+            memory = stop == null ? decide(Mode.FORD_MEMORY, memoryTries, mil, false)
+                    : stopped(Mode.FORD_MEMORY, memoryTries, stop);
+        }
+        return new CodeRead(mil, stored, pending, memory, stop);
     }
 
     /**

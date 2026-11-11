@@ -261,7 +261,7 @@ public class TruckProbeTest {
         FakeElm elm = new FakeElm();
         elm.override("03", "NO DATA");
         String r = run(elm, options(true)).report;
-        assertTrue(r, r.contains("Trouble codes: none found; incomplete: stored (no answer), permanent (no answer)"));
+        assertTrue(r, r.contains("Trouble codes: none found; incomplete: stored (no answer), Ford memory (no answer), permanent (no answer)"));
 
         FakeElm stopped = new FakeElm();
         stopped.override("010D", "5003");

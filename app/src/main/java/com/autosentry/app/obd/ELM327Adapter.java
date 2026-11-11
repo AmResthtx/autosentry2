@@ -222,9 +222,19 @@ public class ELM327Adapter {
         return m.find() ? Double.parseDouble(m.group(1)) : 0;
     }
 
-    /** Raw reply to a trouble-code request (03 stored, 07 pending), for DTCReader to parse. */
+    /**
+     * Raw reply to a trouble-code request (03 stored, 07 pending, 13 Ford memory), for
+     * DTCReader to parse. Ford's 13 goes straight to the PCM, like the Mode 22 reads.
+     */
     public synchronized String requestTroubleCodes(DTCReader.Mode mode) throws IOException {
-        return command(String.format(Locale.US, "%02X", mode.request), DTC_TIMEOUT_MS);
+        String request = String.format(Locale.US, "%02X", mode.request);
+        if (mode != DTCReader.Mode.FORD_MEMORY) return command(request, DTC_TIMEOUT_MS);
+        command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        try {
+            return command(request, DTC_TIMEOUT_MS);
+        } finally {
+            command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
+        }
     }
 
     /**

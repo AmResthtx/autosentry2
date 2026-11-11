@@ -18,7 +18,8 @@ import java.util.regex.Pattern;
  * {@link ELM327Adapter}, every command is checked here before a byte is
  * written: anything that isn't a read is refused, never sent.
  *
- * Allowed on the bus: OBD-II Modes 01, 02, 03, 07, 09, 0A and UDS 0x22 / 0x19.
+ * Allowed on the bus: OBD-II Modes 01, 02, 03, 07, 09, 0A, Ford's 0x13 (read
+ * continuous-memory codes) and UDS 0x22 / 0x19.
  * Everything else (clear codes 04/14, sessions 10, reset 11, security 27,
  * writes 2E/2F, routines 31, downloads 34-37, tester present 3E, DTC
  * settings 85, ...) is refused. Adapter commands are limited to reads and
@@ -74,7 +75,7 @@ public final class ReadOnlyGuard {
     };
 
     static final Set<Integer> READ_SERVICES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-            0x01, 0x02, 0x03, 0x07, 0x09, 0x0A, 0x19, 0x22)));
+            0x01, 0x02, 0x03, 0x07, 0x09, 0x0A, 0x13, 0x19, 0x22)));
 
     private static final Pattern[] ADAPTER_ALLOWED = patterns(
             "ATI", "AT@1", "ATRV", "ATDP", "ATDPN",       // reads
@@ -261,7 +262,7 @@ public final class ReadOnlyGuard {
     /**
      * Hex digits after the service byte that a positive reply repeats: the
      * PID (01, 09), PID and frame (02), DID (22) or subfunction (19). Code
-     * requests (03, 07, 0A) have nothing to repeat.
+     * requests (03, 07, 0A, 13) have nothing to repeat.
      */
     private static int echoLength(int service) {
         switch (service) {

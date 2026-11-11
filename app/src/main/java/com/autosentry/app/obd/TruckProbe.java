@@ -505,9 +505,10 @@ public final class TruckProbe {
         r.line("Calibration ID (Mode 09 04)", calibration != null ? calibration : "not reported");
         for (DTCReader.Mode mode : DTCReader.Mode.values()) {
             if (cancel.cancelled()) return;
+            if (mode == DTCReader.Mode.FORD_MEMORY && !a.isJ1850Pwm()) continue; // Ford PWM only
             String reply = a.requestTroubleCodes(mode);
             DTCReader.Attempt attempt = DTCReader.classify(reply, mode);
-            String kind = mode.label.toLowerCase(Locale.US);
+            String kind = mode == DTCReader.Mode.FORD_MEMORY ? mode.label : mode.label.toLowerCase(Locale.US);
             String label = mode.label + " codes (Mode " + String.format(Locale.US, "%02X", mode.request) + ")";
             f.codeReads++;
             if (attempt.reply == DTCReader.Reply.CODES || attempt.reply == DTCReader.Reply.NONE) {

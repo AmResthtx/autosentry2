@@ -1210,13 +1210,18 @@ public class MainActivity extends AppCompatActivity {
         if (scan != null) {
             String problem = scan.problemHeadline();
             boolean failed = scan.stored.outcome == DTCReader.Outcome.FAILED
-                    || scan.pending.outcome == DTCReader.Outcome.FAILED;
+                    || scan.pending.outcome == DTCReader.Outcome.FAILED
+                    || (scan.memory != null && scan.memory.outcome == DTCReader.Outcome.FAILED);
             if (problem != null) addReadProblem(problem, scan.problemDetail(), failed, busy);
             if (scan.complete() && scan.codes.isEmpty()) {
-                addCodesNote("No stored or pending codes.");
+                addCodesNote(scan.memory == null ? "No stored or pending codes."
+                        : "No stored, pending or Ford memory codes.");
             } else {
                 if (scan.stored.outcome == DTCReader.Outcome.NONE) addCodesNote("No stored codes.");
                 if (scan.pending.outcome == DTCReader.Outcome.NONE) addCodesNote("No pending codes.");
+                if (scan.memory != null && scan.memory.outcome == DTCReader.Outcome.NONE) {
+                    addCodesNote("No Ford memory codes.");
+                }
             }
             for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
         }

@@ -632,15 +632,20 @@ public class MainActivity extends AppCompatActivity {
             }
             String text = message;
             boolean restart = done;
-            uiHandler.post(() -> showNotice(restart ? "Restored" : "Not restored", text, () -> {
-                Backup.restoring = false;
-                if (restart) {
-                    finishAffinity();
-                    android.os.Process.killProcess(android.os.Process.myPid());
-                } else {
+            uiHandler.post(() -> {
+                if (!restart) {
+                    Backup.restoring = false; // even if this screen is gone and can't show the notice
                     maybeAutoStartTracking();
+                } else if (isFinishing() || isDestroyed()) {
+                    android.os.Process.killProcess(android.os.Process.myPid()); // nothing left to show it on
                 }
-            }));
+                showNotice(restart ? "Restored" : "Not restored", text, () -> {
+                    if (restart) {
+                        finishAffinity();
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    }
+                });
+            });
         });
     }
 

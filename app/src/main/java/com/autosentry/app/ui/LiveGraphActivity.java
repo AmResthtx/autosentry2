@@ -77,10 +77,14 @@ public class LiveGraphActivity extends AppCompatActivity {
                 ContextCompat.getColor(this, R.color.fs_val_yellow), ContextCompat.getColor(this, R.color.fs_val_pink)};
         int pad = dp(12);
 
+        // The outer frame takes the system-bar insets (which replace its padding); the inner
+        // layout keeps the screen's own padding.
+        android.widget.FrameLayout frame = new android.widget.FrameLayout(this);
+        frame.setFitsSystemWindows(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setFitsSystemWindows(true);
         root.setPadding(pad, pad, pad, 0);
+        frame.addView(root);
 
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
@@ -131,7 +135,7 @@ public class LiveGraphActivity extends AppCompatActivity {
         }
         scroll.addView(list);
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        setContentView(root);
+        setContentView(frame);
     }
 
     @Override

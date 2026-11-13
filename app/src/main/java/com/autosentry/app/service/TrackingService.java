@@ -979,6 +979,7 @@ public class TrackingService extends Service {
         AppLog.i(this, TAG, cleared ? "Trouble codes cleared" : "Clear codes: truck didn't confirm");
         scanCodes();
         DiagnosticCodes.Scan after = DiagnosticCodes.lastScan;
+        if (after == before) return; // the engine started mid re-read; scanCodes already said so
         int left = after == null ? 0 : after.codes.size();
         if (!cleared) {
             DiagnosticCodes.message = "The truck didn't confirm the clear. Check that the key is on and the engine is off.";

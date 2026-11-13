@@ -127,6 +127,24 @@ public class TruckProbeTest {
     }
 
     @Test
+    public void everyModuleFoundIsAskedForItsOwnCodes() {
+        FakeElm elm = new FakeElm();
+        // The first ask is the engine computer's memory read; the second is the per-module pass.
+        elm.override("13", "NO DATA", "53412304700000");
+        TruckProbe.Result result = run(elm, options(true));
+        assertTrue(result.report, result.report.contains("MODULE TROUBLE CODES"));
+        assertTrue(result.report, result.report.contains("C0123, P0470 (Exhaust back pressure sensor circuit)"));
+        assertTrue(result.json, result.json.contains("moduleCodes"));
+    }
+
+    @Test
+    public void aModuleThatStaysSilentIsNotReadNeverClean() {
+        TruckProbe.Result result = run(new FakeElm(), options(true));
+        assertTrue(result.report, result.report.contains("not read: the truck didn't answer  [NO DATA]"));
+        assertFalse(result.report, result.report.contains("answered: no codes"));
+    }
+
+    @Test
     public void pendingModuleIsAskedAgain() {
         FakeElm elm = new FakeElm();
         elm.override("221446", "7F2278"); // still working on it

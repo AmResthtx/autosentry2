@@ -578,11 +578,50 @@ public final class TruckProbe {
         }
     }
 
+    /**
+     * Asks each module the sweep found for its own trouble codes with Ford's service 13 (the
+     * same read-only request the PCM gets for its memory codes). Not confirmed on this truck:
+     * every line carries the raw reply, and a module that stays silent is listed as not
+     * read, never as clean. Meanings come from AutoSentry's own list, which so far covers the
+     * engine computer's codes only.
+     */
+    private static void moduleCodes(ELM327Adapter a, ScanReport r, Set<String> addresses, String proto,
+                                    String obdHeader, CancelCheck cancel) throws IOException {
+        r.section("moduleCodes", "MODULE TROUBLE CODES (Ford service 13 to each module found; not confirmed on this truck)");
+        try {
+            for (String address : addresses) {
+                if (cancel.cancelled()) break;
+                if (!address.matches("[0-9A-Fa-f]{2}")) continue;
+                a.rawCommand("ATSHC4" + address.toUpperCase(Locale.US) + "F1", AT_MS);
+                String reply = a.rawCommand("13", QUERY_MS);
+                DTCReader.Attempt attempt = DTCReader.classify(reply, DTCReader.Mode.FORD_MEMORY);
+                String result;
+                switch (attempt.reply) {
+                    case CODES: {
+                        List<String> described = new ArrayList<>();
+                        for (String code : attempt.codes) described.add(DTCReader.describe(code));
+                        result = String.join(", ", described);
+                        break;
+                    }
+                    case NONE: result = "answered: no codes"; break;
+                    case REFUSED: result = "not read: " + attempt.problem; break;
+                    default: result = "not read: " + (attempt.problem == null ? "no clean answer" : attempt.problem);
+                }
+                r.item(address + "  " + moduleName(address, proto) + "  " + result + "  [" + oneLine(reply) + "]",
+                        ScanReport.fields("address", address, "name", moduleName(address, proto),
+                                "result", result, "reply", oneLine(reply)));
+            }
+        } finally {
+            a.rawCommand("ATSH" + obdHeader, AT_MS);
+        }
+        r.note("(Codes with no meaning shown aren't in AutoSentry's list yet; the list covers the engine computer.)");
+    }
+
     private static void sweeps(ELM327Adapter a, ScanReport r, Findings f, Progress progress, CancelCheck cancel,
                                String proto, boolean pwm, String pcmHeader, String obdHeader) throws IOException {
+        Map<String, String> modules = new LinkedHashMap<>();
         if (pwm) {
             r.section("moduleSweep", "FORD MODULE SWEEP (every J1850 address, Mode 22 read)");
-            Map<String, String> modules = new LinkedHashMap<>();
             try {
                 for (int target = 0x00; target <= 0xFF; target++) {
                     if (cancel.cancelled()) break;
@@ -608,6 +647,8 @@ public final class TruckProbe {
             r.note("(A reply starting 7F is a module saying \"I'm here, but not that PID.\" It still proves the module exists.)");
         }
         a.rawCommand("ATH0", AT_MS);
+        if (cancel.cancelled()) return;
+        if (pwm && !modules.isEmpty()) moduleCodes(a, r, modules.keySet(), proto, obdHeader, cancel);
         if (cancel.cancelled()) return;
 
         // ---- PCM Mode 22 sweep ----

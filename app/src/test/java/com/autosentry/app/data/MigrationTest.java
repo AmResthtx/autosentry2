@@ -191,7 +191,7 @@ public class MigrationTest {
         room.close();
         SupportSQLiteDatabase db = openWithRoom();
         assertDrivingHistoryKept(db);
-        assertEquals(1, room.koeoReportDao().latest(10).size());
+        assertEquals("1", one(db, "SELECT COUNT(*) FROM koeo_reports"));
     }
 
     /** No destructive fallback: a file this build can't read makes it stop, and the file is left alone. */

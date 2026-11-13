@@ -55,6 +55,7 @@ import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.DtcSeverity;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
+import com.autosentry.app.obd.PollPlan;
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
 import com.autosentry.app.util.Backup;
@@ -210,6 +211,7 @@ public class MainActivity extends AppCompatActivity {
             tabButtons[i].setOnClickListener(v -> showTab(tab));
         }
         buttonEditDashboard.setOnClickListener(v -> showEditDashboard());
+        findViewById(R.id.buttonLiveGraph).setOnClickListener(v -> startActivity(new Intent(this, LiveGraphActivity.class)));
         findViewById(R.id.buttonZoomIn).setOnClickListener(v -> changeTileColumns(-1));
         findViewById(R.id.buttonZoomOut).setOnClickListener(v -> changeTileColumns(1));
         findViewById(R.id.buttonInfo).setOnClickListener(v -> new AlertDialog.Builder(this)
@@ -768,10 +770,9 @@ public class MainActivity extends AppCompatActivity {
             if (value == null && tile.pidId == PidCatalog.COMPUTED_ODOMETER && profile != null) {
                 value = profile.odometerMiles;
             }
-            // Truck has been scanned and confirmed it doesn't answer this one — say so
-            // instead of leaving it blank with no explanation.
-            boolean noAnswer = value == null && def != null && !def.computed
-                    && !supported.isEmpty() && !supported.contains(tile.pidId);
+            // A reading the truck doesn't give says so on its tile, instead of sitting blank.
+            String why = value == null && def != null ? unavailableReason(def, supported) : null;
+            boolean noAnswer = why != null;
 
             GaugeScale.Level level = GaugeScale.Level.OK;
             if (value != null) {
@@ -785,13 +786,44 @@ public class MainActivity extends AppCompatActivity {
                     worstValue = value;
                 }
             }
-            String text = value != null && def != null ? def.formatValue(value) : "--";
+            String text = value != null && def != null ? def.formatValue(value) : (noAnswer ? "no answer" : "--");
             tile.view.setReading(value == null ? Double.NaN : value, text, level, noAnswer);
             tile.view.setContentDescription(tile.name + " " + text + (def == null ? "" : " " + def.unit)
-                    + (noAnswer ? ", not supported by this truck" : ""));
+                    + (noAnswer ? ", " + why : ""));
         }
         updateHealthChip(readings, watch, critical);
         updateAlert(worstDef, worstValue, worstLevel);
+    }
+
+    /**
+     * Why a reading has no value, in the words shown to the owner; null when it simply hasn't
+     * been read yet (or is calculated). Comes from the service's poll plan while the truck is
+     * connected, and from the truck's own list of standard readings otherwise.
+     */
+    private static String unavailableReason(PidCatalog.Pid def, Set<Integer> supported) {
+        if (def.computed) return null;
+        PollPlan.State state = LiveReadings.states.get(def.id);
+        if (state != null) return state.unavailable() ? state.label : null;
+        if (!supported.isEmpty() && !supported.contains(def.id)) return PollPlan.State.NOT_OFFERED.label;
+        return null;
+    }
+
+    /** Everything known about one reading: what is asked, how it's worked out, and how far to trust it. */
+    private void showReadingDetails(PidCatalog.Pid def) {
+        Set<Integer> supported = !LiveReadings.supported.isEmpty()
+                ? LiveReadings.supported : AppSettings.getSupportedPids(this);
+        StringBuilder sb = new StringBuilder();
+        Double value = LiveReadings.values.get(def.id);
+        String why = unavailableReason(def, supported);
+        sb.append("Now: ").append(value != null ? def.formatValue(value) + " " + def.unit
+                : why != null ? "unavailable, " + why : "no reading yet").append("\n\n");
+        sb.append(def.computed ? "Calculated" : "Measured by the truck").append(". ").append(def.trust.explanation).append(".\n\n");
+        if (def.request() != null) sb.append("Asked of the truck: ").append(def.request()).append("\n");
+        sb.append("Formula: ").append(def.formula.isEmpty() ? "the SAE J1979 formula for this reading" : def.formula).append("\n");
+        sb.append("Source: ").append(def.source).append("\n\n");
+        sb.append("A reading is marked confirmed only after its raw replies were captured on this truck and compared "
+                + "with a known-good value (docs/PROVENANCE.md).");
+        new AlertDialog.Builder(this).setTitle(def.label()).setMessage(sb.toString()).setPositiveButton("OK", null).show();
     }
 
     /** One line under the toolbar naming the reading that is furthest out of range. */
@@ -876,10 +908,14 @@ public class MainActivity extends AppCompatActivity {
     private void showTileMenu(int pidId) {
         PidCatalog.Pid def = PidCatalog.get(pidId);
         if (def == null) return;
-        String[] items = {"Move to front", "Move earlier", "Move later", "Remove from dashboard"};
+        String[] items = {"Move to front", "Move earlier", "Move later", "Remove from dashboard", "About this reading"};
         new AlertDialog.Builder(this)
                 .setTitle(def.name)
                 .setItems(items, (dialog, which) -> {
+                    if (which == 4) {
+                        showReadingDetails(def);
+                        return;
+                    }
                     List<Integer> ids = new ArrayList<>(AppSettings.getDashboardPids(this));
                     int i = ids.indexOf(pidId);
                     if (i < 0) return;
@@ -928,9 +964,12 @@ public class MainActivity extends AppCompatActivity {
         boolean[] checked = new boolean[options.size()];
         for (int i = 0; i < options.size(); i++) {
             PidCatalog.Pid pid = options.get(i);
-            String note = "";
-            if (!pid.computed && supported.isEmpty()) note = "  — not checked on the truck yet";
-            else if (!pid.computed && !supported.contains(pid.id)) note = "  — truck didn't answer";
+            // Each line carries its trust label, and what the truck did when asked.
+            String why = unavailableReason(pid, supported);
+            String note = "  — " + pid.trust.shortLabel;
+            if (why != null) note += ", " + why;
+            else if (LiveReadings.states.get(pid.id) == PollPlan.State.LIVE) note += ", live";
+            else if (!pid.computed && supported.isEmpty()) note += ", not checked on the truck yet";
             labels[i] = pid.label() + note;
             checked[i] = current.contains(pid.id);
         }

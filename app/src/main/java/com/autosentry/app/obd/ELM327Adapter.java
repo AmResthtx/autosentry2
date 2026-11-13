@@ -44,6 +44,9 @@ public class ELM327Adapter {
 
     private BluetoothSocket socket = null;
     private String lastEnhancedReply = "";
+    // The raw reply to the last ask for each reading, kept so a reading that stops answering
+    // can be logged with exactly what the truck said. Keys: "010C", "221446".
+    private final java.util.Map<String, String> lastReplies = new java.util.HashMap<>();
     private InputStream inputStream = null;
     private OutputStream outputStream = null;
     private String adapterAddress = null;
@@ -417,7 +420,9 @@ public class ELM327Adapter {
 
     /** Returns the data bytes after "41 <pid>", or null when the truck had no answer. */
     private int[] readPid(int pid, long timeoutMs) throws IOException {
-        String response = command(String.format(Locale.US, "01%02X", pid), timeoutMs);
+        String request = String.format(Locale.US, "01%02X", pid);
+        String response = command(request, timeoutMs);
+        lastReplies.put(request, response);
         return parseMode01(response, pid);
     }
 
@@ -457,6 +462,7 @@ public class ELM327Adapter {
             }
             for (int i = 0; i < pids.length; i++) {
                 String reply = command("22" + pids[i], PID_TIMEOUT_MS);
+                lastReplies.put("22" + pids[i], reply);
                 if (replies.length() > 0) replies.append(" | ");
                 replies.append(reply.replace(">", "").replaceAll("\\s+", " ").trim());
                 data[i] = parseReply(reply, "62" + pids[i]);
@@ -468,6 +474,29 @@ public class ELM327Adapter {
         return data;
     }
 
+
+    /** The raw reply to the last ask of {@code request} ("010C", "221446") on one line; "never asked" when it wasn't. */
+    public synchronized String lastReplyTo(String request) {
+        String reply = lastReplies.get(request);
+        return reply == null ? "never asked" : DTCReader.oneLine(reply);
+    }
+
+    /**
+     * True when the PCM's last reply to this Mode 22 PID was a refusal (7F 22 ...), as
+     * opposed to silence. A refused reading is one the computer says it doesn't have.
+     */
+    public synchronized boolean fordRefused(String pid) {
+        return isRefusal(lastReplies.get("22" + pid), "22");
+    }
+
+    static boolean isRefusal(String reply, String service) {
+        if (reply == null) return false;
+        for (String rawLine : DTCReader.stripFrames(reply).split("[\\r\\n]+")) {
+            String line = rawLine.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
+            if (line.startsWith("7F" + service)) return true;
+        }
+        return false;
+    }
 
     /** Raw reply to the last enhanced request, for the debug log when a PID doesn't answer. */
     public synchronized String lastEnhancedReply() {

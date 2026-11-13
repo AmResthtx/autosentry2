@@ -41,6 +41,7 @@ import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.ELM327Adapter;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
+import com.autosentry.app.obd.PollPlan;
 import com.autosentry.app.obd.SystemsScan;
 import com.autosentry.app.obd.TruckProbe;
 import com.autosentry.app.settings.AppSettings;
@@ -116,9 +117,6 @@ public class TrackingService extends Service {
     private static final long OIL_PROBE_RETRY_MS = 30_000L;
     // Oil temp moves slowly; reading it less often keeps the header switches off every poll.
     private static final long OIL_READ_INTERVAL_MS = 2_000L;
-    // ICP/IPR (Ford Mode 22) are read only while one is on the dashboard, with the same header-switch cost.
-    private static final long ICP_READ_INTERVAL_MS = 1_000L;
-    private static final long FORD_EXTRA_READ_INTERVAL_MS = 2_000L;
     // GPS below this is parked jitter, not driving.
     private static final double GPS_MOVING_MPH = 3.0;
     private static final double STARTED_RPM = EngineWatch.RUNNING_RPM;
@@ -150,8 +148,13 @@ public class TrackingService extends Service {
     private long crankSeenAt = 0;
     private long lastOilProbe = 0;
     private long lastOilRead = 0;
-    private long lastIcpRead = 0;
-    private long lastFordExtraRead = 0;
+    // Which readings to ask for on each pass; engine and road speed are never dropped.
+    private final PollPlan pollPlan = new PollPlan(PidCatalog.RPM, PidCatalog.SPEED);
+    // Manifold pressure with the engine stopped this key cycle: outside air pressure, for boost.
+    private double engineOffMapPsi = Double.NaN;
+    private com.autosentry.app.obd.LiveRecorder recorder;
+    private java.io.File recordingFile;
+    private static final long MAX_RECORDING_MS = 6 * 60 * 60_000L;
     // Stall alert while running; second-by-second RPM swings only while cranking.
     private final EngineWatch engineWatch = new EngineWatch();
     private final StallLog stallLog = new StallLog();
@@ -430,6 +433,7 @@ public class TrackingService extends Service {
      */
     private void waitForKeyOn() {
         finishKoeo(); // key cycle over: keep whatever the crank showed (or that it never cranked)
+        stopRecording("The truck was switched off");
         long now = System.currentTimeMillis();
         onEngineEvents(engineWatch.update(now, null), now, null); // truck off: a crank still open ends as no start
         if (realAdapter.isConnected()) {
@@ -527,6 +531,8 @@ public class TrackingService extends Service {
             return false;
         }
         supportedPids = found;
+        pollPlan.reset();
+        engineOffMapPsi = Double.NaN;
         lastConnectedTimestamp = System.currentTimeMillis();
         mainHandler.post(this::startGps);
         String protocol = realAdapter.describeProtocol();
@@ -1073,58 +1079,64 @@ public class TrackingService extends Service {
         want.add(PidCatalog.FUEL_RATE);
         want.add(PidCatalog.ENGINE_OIL_TEMP);
 
+        if (want.contains(PidCatalog.COMPUTED_BOOST)) {
+            want.add(0x0B); // manifold pressure, and Ford's outside-air pressure when the bus has it
+            if (pwmBus) want.add(PidCatalog.FORD_BARO);
+        }
+
+        // Sort what's wanted into standard readings and Ford ones; the plan then picks which
+        // are due this pass, so slow or silent readings don't hold up the fast ones.
+        long now = System.currentTimeMillis();
+        List<Integer> standard = new ArrayList<>();
+        List<Integer> ford = new ArrayList<>();
         for (int id : want) {
             PidCatalog.Pid def = PidCatalog.get(id);
             if (def == null || def.computed) continue;
-            if (!supportedPids.contains(id)) continue;
-            int[] data = realAdapter.readPid(id);
-            double value = def.decode(data);
-            if (Double.isNaN(value)) {
-                LiveReadings.values.remove(id);
-            } else {
-                LiveReadings.values.put(id, value);
+            if (def.fordCode != null && pwmBus) {
+                ford.add(id);
+            } else if (def.fordCode == null && supportedPids.contains(id)) {
+                standard.add(id);
+            } else if (id != PidCatalog.ENGINE_OIL_TEMP || !pwmBus) { // oil temp on a PWM truck: Ford's PID, below
+                pollPlan.notOffered(id);
+                LiveReadings.states.put(id, PollPlan.State.NOT_OFFERED);
             }
         }
-        long now = System.currentTimeMillis();
+        for (int id : pollPlan.due(standard, now)) {
+            PidCatalog.Pid def = PidCatalog.get(id);
+            double value = def.decode(realAdapter.readPid(id));
+            noteReading(def, value, now, false);
+        }
         if (!fordOilTemp && pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)
                 && now - lastOilProbe >= OIL_PROBE_RETRY_MS) {
             probeFordOilTemp();
             if (fordOilTemp) AppLog.i(this, TAG, "Ford oil temp (22 1310) is answering now");
         }
-        if (fordOilTemp && now - lastOilRead >= OIL_READ_INTERVAL_MS) {
-            lastOilRead = now;
-            double oilC = realAdapter.readFordEngineOilTempC();
-            if (Double.isNaN(oilC)) {
-                LiveReadings.values.remove(PidCatalog.ENGINE_OIL_TEMP);
-            } else {
-                LiveReadings.values.put(PidCatalog.ENGINE_OIL_TEMP, oilC * 9.0 / 5.0 + 32.0);
+        if (pwmBus && !supportedPids.contains(PidCatalog.ENGINE_OIL_TEMP)) {
+            if (!fordOilTemp) {
+                LiveReadings.states.put(PidCatalog.ENGINE_OIL_TEMP, realAdapter.fordRefused("1310")
+                        ? PollPlan.State.REFUSED : PollPlan.State.NO_ANSWER);
+            } else if (now - lastOilRead >= OIL_READ_INTERVAL_MS) {
+                lastOilRead = now;
+                double oilC = realAdapter.readFordEngineOilTempC();
+                putOrRemove(PidCatalog.ENGINE_OIL_TEMP, Double.isNaN(oilC) ? Double.NaN : oilC * 9.0 / 5.0 + 32.0);
+                LiveReadings.states.put(PidCatalog.ENGINE_OIL_TEMP,
+                        Double.isNaN(oilC) ? PollPlan.State.NO_ANSWER : PollPlan.State.LIVE);
             }
         }
 
-        if (pwmBus && (want.contains(PidCatalog.FORD_ICP) || want.contains(PidCatalog.FORD_IPR))
-                && now - lastIcpRead >= ICP_READ_INTERVAL_MS) {
-            lastIcpRead = now;
-            double[] icpIpr = realAdapter.readFordIcpIpr();
-            putOrRemove(PidCatalog.FORD_ICP, icpIpr[0]);
-            putOrRemove(PidCatalog.FORD_IPR, icpIpr[1]);
-        }
-
-        if (pwmBus && now - lastFordExtraRead >= FORD_EXTRA_READ_INTERVAL_MS) {
-            List<PidCatalog.Pid> extras = new ArrayList<>();
-            for (int id : want) {
-                PidCatalog.Pid def = PidCatalog.get(id);
-                if (def != null && def.fordCode != null) extras.add(def);
-            }
-            if (!extras.isEmpty()) {
-                lastFordExtraRead = now;
-                String[] codes = new String[extras.size()];
-                for (int i = 0; i < codes.length; i++) codes[i] = extras.get(i).fordCode;
-                int[][] raw = realAdapter.readFordRaw(codes);
-                for (int i = 0; i < codes.length; i++) {
-                    putOrRemove(extras.get(i).id, extras.get(i).decode(raw[i]));
-                }
+        // Every Ford reading that is due shares one switch to the PCM's address and back.
+        List<Integer> fordDue = pollPlan.due(ford, now);
+        if (!fordDue.isEmpty()) {
+            String[] codes = new String[fordDue.size()];
+            for (int i = 0; i < codes.length; i++) codes[i] = PidCatalog.get(fordDue.get(i)).fordCode;
+            int[][] raw = realAdapter.readFordRaw(codes);
+            for (int i = 0; i < codes.length; i++) {
+                PidCatalog.Pid def = PidCatalog.get(fordDue.get(i));
+                noteReading(def, def.decode(raw[i]), now, realAdapter.fordRefused(codes[i]));
             }
         }
+        updateBoost(want);
+        recordAndRemember(now);
 
         lastConnectedTimestamp = now;
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
@@ -1217,6 +1229,104 @@ public class TrackingService extends Service {
             lastPersistTimestamp = now;
             persist(now, speedMph, rpm != null ? rpm : 0, maf != null ? maf : 0);
         }
+    }
+
+    /**
+     * Files one reading's result: the value (or its absence) for the dashboard, and the
+     * outcome for the poll plan. The first time a reading is given up on, the truck's raw
+     * reply goes in the debug log, which is what's needed to fix a wrong request.
+     */
+    private void noteReading(PidCatalog.Pid def, double value, long now, boolean refused) {
+        PollPlan.State before = pollPlan.state(def.id);
+        putOrRemove(def.id, value);
+        if (!Double.isNaN(value)) {
+            pollPlan.answered(def.id, now);
+        } else if (refused) {
+            pollPlan.refused(def.id, now);
+        } else {
+            pollPlan.missed(def.id, now);
+        }
+        PollPlan.State after = pollPlan.state(def.id);
+        LiveReadings.states.put(def.id, after);
+        if (after != before && after.unavailable()) {
+            String request = def.fordCode != null ? "22" + def.fordCode : String.format(Locale.US, "01%02X", def.id);
+            AppLog.i(this, TAG, def.name + " (" + def.request() + "): " + after.label + ". The truck's reply: "
+                    + realAdapter.lastReplyTo(request) + ". Asked again every "
+                    + (after == PollPlan.State.REFUSED ? "5 minutes" : "30 seconds") + ".");
+        } else if (after == PollPlan.State.LIVE && before.unavailable()) {
+            AppLog.i(this, TAG, def.name + " is answering now");
+        }
+    }
+
+    /**
+     * Boost is manifold pressure minus outside air pressure. Outside air pressure is Ford's
+     * BARO reading when the truck answers it; otherwise the manifold pressure seen with the
+     * engine stopped this key cycle (with no airflow the two are the same). With neither,
+     * there is no boost value: it is never guessed from a standard sea-level number.
+     */
+    private void updateBoost(Set<Integer> want) {
+        Double map = LiveReadings.values.get(0x0B);
+        Double rpm = LiveReadings.values.get(PidCatalog.RPM);
+        if (map != null && rpm != null && rpm == 0) engineOffMapPsi = map;
+        if (!want.contains(PidCatalog.COMPUTED_BOOST)) return;
+        Double baro = LiveReadings.values.get(PidCatalog.FORD_BARO);
+        double outside = baro != null ? baro : engineOffMapPsi;
+        putOrRemove(PidCatalog.COMPUTED_BOOST, map == null || Double.isNaN(outside) ? Double.NaN : map - outside);
+    }
+
+    /** Feeds the graphs, and the CSV file while recording. A file problem never stops tracking. */
+    private void recordAndRemember(long now) {
+        for (java.util.Map.Entry<Integer, Double> e : LiveReadings.values.entrySet()) {
+            LiveReadings.history.add(e.getKey(), now, e.getValue());
+        }
+        try {
+            if (LiveReadings.recordRequested && recorder == null) startRecording(now);
+            if (recorder != null && (!LiveReadings.recordRequested || now - recorder.startedAt() > MAX_RECORDING_MS)) {
+                stopRecording(LiveReadings.recordRequested ? "Stopped after 6 hours" : null);
+            }
+            if (recorder != null) recorder.tick(now, LiveReadings.values);
+        } catch (IOException | RuntimeException e) {
+            AppLog.e(this, TAG, "Recording failed", e);
+            recorder = null;
+            LiveReadings.recording = false;
+            LiveReadings.recordRequested = false;
+            LiveReadings.recordStatus = "Recording stopped: " + e.getMessage();
+        }
+    }
+
+    private void startRecording(long now) throws IOException {
+        java.io.File dir = new java.io.File(getFilesDir(), "livelogs");
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
+        recordingFile = new java.io.File(dir, "live-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date(now)) + ".csv");
+        recorder = new com.autosentry.app.obd.LiveRecorder(new java.io.OutputStreamWriter(
+                new java.io.FileOutputStream(recordingFile), java.nio.charset.StandardCharsets.UTF_8),
+                AppSettings.getDashboardPids(this), now);
+        LiveReadings.recording = true;
+        LiveReadings.recordStatus = "Recording the dashboard's readings once a second…";
+        AppLog.i(this, TAG, "Recording live data to " + recordingFile.getName());
+    }
+
+    /** Closes the file and copies it to Downloads/AutoSentry, where the Files app and USB can reach it. */
+    private void stopRecording(String why) {
+        if (recorder == null) return;
+        com.autosentry.app.obd.LiveRecorder done = recorder;
+        java.io.File file = recordingFile;
+        recorder = null;
+        LiveReadings.recording = false;
+        LiveReadings.recordRequested = false;
+        String prefix = why == null ? "" : why + ". ";
+        try {
+            done.close();
+            String where = TabletFiles.saveBinary(this, file.getName(), "text/csv",
+                    out -> java.nio.file.Files.copy(file.toPath(), out));
+            file.delete();
+            LiveReadings.recordStatus = prefix + "Saved " + done.rows() + " rows to " + where;
+        } catch (IOException | RuntimeException e) {
+            AppLog.e(this, TAG, "Couldn't save the recording to Downloads", e);
+            LiveReadings.recordStatus = prefix + "Recorded " + done.rows() + " rows, but saving to Downloads failed ("
+                    + e.getMessage() + "). The file is kept inside the app and goes into the next backup.";
+        }
+        AppLog.i(this, TAG, "Recording: " + LiveReadings.recordStatus);
     }
 
     private static void putOrRemove(int id, double value) {
@@ -1410,6 +1520,7 @@ public class TrackingService extends Service {
                     db.sessionDao().update(activeSession);
                 }
                 finishKoeo();
+                stopRecording("Tracking stopped");
                 if (profile != null) flushProfile();
                 if (hadTrip) checkServiceAlerts(); // key-off drops the adapter before the engine-off timer ends the trip
             });

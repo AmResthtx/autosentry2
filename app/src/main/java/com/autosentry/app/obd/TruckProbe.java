@@ -121,7 +121,7 @@ public final class TruckProbe {
         pids.put("1446", "Injection control pressure");
         pids.put("1434", "IPR duty cycle");
         for (PidCatalog.Pid p : PidCatalog.all()) {
-            if (p.fordCode != null) pids.put(p.fordCode, p.name);
+            if (p.fordCode != null) pids.putIfAbsent(p.fordCode, p.name);
         }
         return pids;
     }

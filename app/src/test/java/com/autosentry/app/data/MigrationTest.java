@@ -121,10 +121,20 @@ public class MigrationTest {
         }
     }
 
+    /** A number column, read as a number: reading it as text rounds it to six digits. */
+    private static double num(SupportSQLiteDatabase db, String sql) {
+        try (Cursor c = db.query(sql)) {
+            assertTrue("no row for: " + sql, c.moveToFirst());
+            return c.getDouble(0);
+        }
+    }
+
     private static void assertDrivingHistoryKept(SupportSQLiteDatabase db) {
-        assertEquals(187654.3, Double.parseDouble(one(db, "SELECT odometerMiles FROM vehicle_profile")), 1e-9);
-        assertEquals(58.0, Double.parseDouble(one(db, "SELECT oilLifePercent FROM vehicle_profile")), 1e-9);
-        assertEquals("54.3", one(db, "SELECT distanceMiles FROM sessions WHERE id = 7"));
+        assertEquals(187654.3, num(db, "SELECT odometerMiles FROM vehicle_profile"), 1e-9);
+        assertEquals(58.0, num(db, "SELECT oilLifePercent FROM vehicle_profile"), 1e-9);
+        assertEquals(912.4, num(db, "SELECT totalFuelGallons FROM vehicle_profile"), 1e-9);
+        assertEquals(54.3, num(db, "SELECT distanceMiles FROM sessions WHERE id = 7"), 1e-9);
+        assertEquals(185553.8, num(db, "SELECT odometerAtEvent FROM maintenance_events WHERE id = 3"), 1e-9);
         assertEquals("1850", one(db, "SELECT rpm FROM trip_points WHERE sessionId = 7"));
         assertEquals("15W-40, Motorcraft FL-1995", one(db, "SELECT notes FROM maintenance_events WHERE id = 3"));
         assertEquals("700", one(db, "SELECT pidValue FROM pid_records"));
@@ -168,7 +178,7 @@ public class MigrationTest {
         assertDrivingHistoryKept(db);
         assertEquals("Receipt", one(db, "SELECT caption FROM maintenance_attachments"));
         assertEquals("P1211", one(db, "SELECT storedCodes FROM koeo_reports WHERE id = 9"));
-        assertEquals("12.4", one(db, "SELECT keyOnVolts FROM koeo_reports WHERE id = 9"));
+        assertEquals(12.4, num(db, "SELECT keyOnVolts FROM koeo_reports WHERE id = 9"), 1e-9);
         // Codes that were read stay as they were; an old empty list is no longer shown as a clean "none".
         assertNull(one(db, "SELECT storedCodesProblem FROM koeo_reports WHERE id = 9"));
         assertEquals(AppDatabase.UNCONFIRMED_NONE, one(db, "SELECT pendingCodesProblem FROM koeo_reports WHERE id = 9"));

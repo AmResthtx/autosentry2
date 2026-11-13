@@ -61,6 +61,8 @@ public final class DTCReader {
         public final int nrc;
         /** Why this attempt didn't count, in plain English; null for CODES and NONE. */
         public final String problem;
+        /** The adapter's reply as it came, on one line, so a failed read can show exactly what the truck said. */
+        String raw = "";
 
         Attempt(Reply reply, List<String> codes, int nrc, String problem) {
             this.reply = reply;
@@ -146,6 +148,15 @@ public final class DTCReader {
 
         /** Waits out the gap before a retry. Returns why to stop instead (e.g. ENGINE_STARTED), or null to go on. */
         String pauseBeforeRetry() throws IOException;
+
+        /**
+         * One more try at Ford's memory codes with the adapter told to wait as long as it can
+         * and to show whole frames (see ELM327Adapter.requestFordMemoryPatiently). Null when
+         * the link has no such try.
+         */
+        default String requestFordMemoryPatiently() throws IOException {
+            return null;
+        }
     }
 
     /** One full read: check engine light, stored codes, pending codes, and Ford's memory codes. */
@@ -180,7 +191,8 @@ public final class DTCReader {
          */
         FORD_MEMORY(0x13, 'M', "Ford memory",
                 "Saved by the truck's own constant self-checks. Many 7.3L faults show up only here, "
-                        + "with the check engine light off.");
+                        + "with the check engine light off. Not yet confirmed against a real 7.3L: compare with "
+                        + "another scan tool the first time.");
 
         public final int request;
         final char key;
@@ -243,7 +255,7 @@ public final class DTCReader {
         Set<String> codes = new LinkedHashSet<>();
         if (response == null) return new ArrayList<>(codes);
         String header = hex(mode.request + 0x40);
-        for (String message : splitMessages(response)) {
+        for (String message : splitMessages(stripFrames(response))) {
             if (message.startsWith(header)) decodePayload(message.substring(header.length()), codes);
         }
         return new ArrayList<>(codes);
@@ -282,6 +294,53 @@ public final class DTCReader {
      * it, even next to data, since the error means some of the answer was lost.
      */
     public static Attempt classify(String response, Mode mode) {
+        Attempt attempt = classifyReply(stripFrames(response), mode);
+        attempt.raw = oneLine(response);
+        return attempt;
+    }
+
+    /** The reply on one line, cut to a length that fits a status row. */
+    static String oneLine(String response) {
+        if (response == null) return "nothing";
+        String line = response.replace(">", "").replaceAll("[\\r\\n]+", " | ").replaceAll("\\s+", " ").trim();
+        if (line.endsWith("|")) line = line.substring(0, line.length() - 1).trim();
+        if (line.isEmpty()) return "nothing";
+        return line.length() > 120 ? line.substring(0, 120) + "…" : line;
+    }
+
+    /**
+     * With headers on (ATH1) a J1850 line is a whole frame: three header bytes (priority,
+     * target, source), the data, and a checksum. A line is only treated as a frame when it is
+     * addressed to the scan tool (F1) and its checksum is right, so plain replies pass
+     * through untouched. Returns the reply with such lines reduced to their data.
+     */
+    static String stripFrames(String response) {
+        if (response == null) return null;
+        StringBuilder out = new StringBuilder();
+        for (String raw : response.split("(?<=[\\r\\n])")) {
+            String line = raw.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
+            if (line.length() >= 10 && line.length() % 2 == 0 && HEX.matcher(line).matches()
+                    && line.startsWith("F1", 2) && checksumOk(line)) {
+                out.append(line, 6, line.length() - 2).append(raw.contains(">") ? "\r>" : "\r");
+            } else {
+                out.append(raw);
+            }
+        }
+        return out.toString();
+    }
+
+    /** SAE J1850 checksum (CRC-8, polynomial 1D, start FF, inverted) over all but the last byte. */
+    static boolean checksumOk(String hexFrame) {
+        int n = hexFrame.length() / 2;
+        int crc = 0xFF;
+        for (int i = 0; i < n - 1; i++) {
+            crc ^= Integer.parseInt(hexFrame.substring(i * 2, i * 2 + 2), 16);
+            for (int bit = 0; bit < 8; bit++) crc = (crc & 0x80) != 0 ? ((crc << 1) ^ 0x1D) & 0xFF : (crc << 1) & 0xFF;
+        }
+        return (crc ^ 0xFF) == Integer.parseInt(hexFrame.substring((n - 1) * 2), 16);
+    }
+
+    private static Attempt classifyReply(String response, Mode mode) {
         if (response == null || response.trim().isEmpty()) return Attempt.failed("the adapter didn't answer");
         if (response.indexOf('>') < 0) return Attempt.failed("the adapter's answer was cut off");
 
@@ -313,7 +372,10 @@ public final class DTCReader {
                 }
                 answered = true;
             } else if (message.startsWith(refusal)) {
-                nrc = message.length() >= 6 ? Integer.parseInt(message.substring(4, 6), 16) : -1;
+                // ISO style is 7F, service, reason. Ford's older computers pad to six bytes and
+                // put the reason last (7F 13 00 00 00 12). The last byte is the reason in both.
+                nrc = message.length() >= 6 && message.length() % 2 == 0
+                        ? Integer.parseInt(message.substring(message.length() - 2), 16) : -1;
             } else {
                 return Attempt.failed("the answer didn't make sense");
             }
@@ -371,6 +433,16 @@ public final class DTCReader {
      * PID 01's count is an incomplete read, never a clean one.
      */
     public static Result decide(Mode mode, List<Attempt> attempts, MilStatus mil, boolean pcmAnswered) {
+        Result result = decideOutcome(mode, attempts, mil, pcmAnswered);
+        if (mode != Mode.FORD_MEMORY || result.answered() || attempts.isEmpty()) return result;
+        // This request isn't confirmed on a real 7.3L yet, so a failure shows what the truck
+        // actually sent: that one line is what's needed to correct the request.
+        String raw = attempts.get(attempts.size() - 1).raw;
+        return new Result(mode, result.outcome, result.codes, result.problem + " (the truck's reply: " + raw + ")",
+                result.attempts);
+    }
+
+    private static Result decideOutcome(Mode mode, List<Attempt> attempts, MilStatus mil, boolean pcmAnswered) {
         Set<String> codes = new LinkedHashSet<>();
         boolean answered = false;
         boolean allNoData = !attempts.isEmpty();
@@ -469,7 +541,15 @@ public final class DTCReader {
             tries.add(a);
             seen.addAll(a.codes);
             boolean done = a.answered() ? seen.size() >= expected : a.reply == Reply.REFUSED;
-            if (done || tries.size() >= MAX_ATTEMPTS) return null;
+            if (done) return null;
+            if (tries.size() >= MAX_ATTEMPTS) {
+                if (mode == Mode.FORD_MEMORY) {
+                    // Same request, slower: the computer may just need longer than the adapter waits.
+                    String patient = link.requestFordMemoryPatiently();
+                    if (patient != null) tries.add(classify(patient, mode));
+                }
+                return null;
+            }
             String stop = link.pauseBeforeRetry();
             if (stop != null) return stop;
         }

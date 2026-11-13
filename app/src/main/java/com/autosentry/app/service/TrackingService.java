@@ -922,6 +922,19 @@ public class TrackingService extends Service {
             return;
         }
         publishScan(DiagnosticCodes.Scan.of(System.currentTimeMillis(), read));
+        logFordCodeCounts();
+    }
+
+    /**
+     * Evidence for the debug log only, never used for a decision: Ford's two code-count PIDs
+     * (22 0200 and 22 0202, see docs/PROVENANCE.md). If the memory read and another scan tool
+     * ever disagree, these raw replies help work out why.
+     */
+    private void logFordCodeCounts() throws IOException {
+        if (!pwmBus) return;
+        realAdapter.readFordRaw("0200", "0202");
+        AppLog.i(this, TAG, "Ford code-count PIDs 22 0200 | 22 0202 (not confirmed, logged as evidence only): "
+                + realAdapter.lastEnhancedReply());
     }
 
     /**
@@ -959,8 +972,18 @@ public class TrackingService extends Service {
         boolean cleared = realAdapter.clearTroubleCodes();
         AppLog.i(this, TAG, cleared ? "Trouble codes cleared" : "Clear codes: truck didn't confirm");
         scanCodes();
-        DiagnosticCodes.message = cleared ? "Codes cleared. The codes from before are saved below."
-                : "The truck didn't confirm the clear. Check that the key is on and the engine is off.";
+        DiagnosticCodes.Scan after = DiagnosticCodes.lastScan;
+        int left = after == null ? 0 : after.codes.size();
+        if (!cleared) {
+            DiagnosticCodes.message = "The truck didn't confirm the clear. Check that the key is on and the engine is off.";
+        } else if (left > 0) {
+            // Said plainly: a clear that leaves codes behind hasn't fixed anything.
+            DiagnosticCodes.message = "The truck confirmed the clear, but " + left + (left == 1 ? " code is" : " codes are")
+                    + " still there. A fault that is still present sets its code again at once. "
+                    + "The codes from before are saved below.";
+        } else {
+            DiagnosticCodes.message = "Codes cleared. The codes from before are saved below.";
+        }
     }
 
     /** Shows a finished read on the Checks tab and saves it, so a failed read stays failed across restarts. */
@@ -1003,6 +1026,11 @@ public class TrackingService extends Service {
                 @Override
                 public String pauseBeforeRetry() throws IOException {
                     return pauseBetweenCodeReads(watchCrank);
+                }
+
+                @Override
+                public String requestFordMemoryPatiently() throws IOException {
+                    return realAdapter.requestFordMemoryPatiently();
                 }
             }, supportedPids.contains(0x01), pwmBus);
         } finally {

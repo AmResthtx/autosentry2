@@ -32,6 +32,7 @@ public class ELM327Adapter {
     private static final long PID_TIMEOUT_MS = 2500L;
     // Trouble-code replies can run several frames, and a clear makes the PCM erase memory.
     private static final long DTC_TIMEOUT_MS = 6000L;
+    private static final long PATIENT_TIMEOUT_MS = 10000L;
 
     // Ford enhanced (Mode 22) PIDs on J1850 PWM answer only when addressed to the PCM (0x10)
     // from the tester (F1); Mode 01 needs the functional OBD header back afterwards.
@@ -229,12 +230,53 @@ public class ELM327Adapter {
     public synchronized String requestTroubleCodes(DTCReader.Mode mode) throws IOException {
         String request = String.format(Locale.US, "%02X", mode.request);
         if (mode != DTCReader.Mode.FORD_MEMORY) return command(request, DTC_TIMEOUT_MS);
-        command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        String headerReply = command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
         try {
+            // Nothing goes to the truck unless the adapter took the PCM address.
+            if (!isOk(headerReply)) return headerReply;
             return command(request, DTC_TIMEOUT_MS);
         } finally {
-            command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
+            restoreObdHeader();
         }
+    }
+
+    /**
+     * The same Ford memory request, for when the normal one got no answer: adaptive timing
+     * off and the adapter's longest wait (about 1 s, where it normally gives up after 0.2 s),
+     * and headers on so the debug log shows the whole frame, sender included. Only adapter
+     * settings differ; what goes to the truck is the same one byte. Everything is put back
+     * afterwards, and if the adapter won't confirm that, the link is reset.
+     */
+    public synchronized String requestFordMemoryPatiently() throws IOException {
+        String headerReply = command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        try {
+            if (!isOk(headerReply)) return headerReply;
+            command("ATH1", AT_TIMEOUT_MS);
+            command("ATAT0", AT_TIMEOUT_MS);
+            command("ATSTFF", AT_TIMEOUT_MS);
+            return command("13", PATIENT_TIMEOUT_MS);
+        } finally {
+            boolean headersOff = isOk(command("ATH0", AT_TIMEOUT_MS));
+            command("ATAT1", AT_TIMEOUT_MS);
+            command("ATST32", AT_TIMEOUT_MS); // the ELM327's default, 200 ms
+            restoreObdHeader();
+            // With headers left on, every reading would stop parsing and look like "engine off".
+            if (!headersOff) throw new IOException("Adapter didn't turn headers back off");
+        }
+    }
+
+    static boolean isOk(String reply) {
+        return reply != null && reply.toUpperCase(Locale.US).contains("OK");
+    }
+
+    /**
+     * Back to the standard OBD address. Checked, because if it silently failed every Mode 01
+     * request after it would go to the PCM's Ford address and be turned down, and the truck
+     * would look switched off. A second refusal throws, which resets the adapter (ATZ).
+     */
+    private void restoreObdHeader() throws IOException {
+        if (isOk(command(OBD_PWM_HEADER, AT_TIMEOUT_MS)) || isOk(command(OBD_PWM_HEADER, AT_TIMEOUT_MS))) return;
+        throw new IOException("Adapter didn't restore the OBD header");
     }
 
     /**
@@ -258,6 +300,7 @@ public class ELM327Adapter {
         Set<Integer> supported = new HashSet<>();
         for (int base = 0x00; base <= 0x80; base += 0x20) {
             int[] data = readPid(base, base == 0 ? BUS_INIT_TIMEOUT_MS : PID_TIMEOUT_MS);
+            if (base == 0 && data == null) data = retryOnPwm();
             if (data == null || data.length < 4) break;
             long mask = ((long) data[0] << 24) | ((long) data[1] << 16) | ((long) data[2] << 8) | data[3];
             for (int i = 0; i < 32; i++) {
@@ -267,6 +310,20 @@ public class ELM327Adapter {
         }
         if (!supported.isEmpty()) j1850Pwm = isJ1850PwmProtocol(command("ATDPN", AT_TIMEOUT_MS));
         return supported;
+    }
+
+    /**
+     * The adapter's protocol search found nothing. One public capture from a 2001 7.3L reports
+     * the search hanging on that truck, so ask once more on J1850 PWM directly (ATTP1: "try
+     * protocol 1", which unlike ATSP1 isn't saved in the adapter). With the key off this is
+     * one more quick NO DATA. Whatever happens, the adapter goes back to searching, so a
+     * truck on another protocol still connects next time.
+     */
+    private int[] retryOnPwm() throws IOException {
+        if (!isOk(command("ATTP1", AT_TIMEOUT_MS))) return null;
+        int[] data = readPid(0x00, PID_TIMEOUT_MS);
+        if (data == null) command("ATSP0", AT_TIMEOUT_MS);
+        return data;
     }
 
     /** True once the bus is up and the adapter settled on J1850 PWM (the 7.3L's bus). */
@@ -392,8 +449,12 @@ public class ELM327Adapter {
     private int[][] readFord(String... pids) throws IOException {
         int[][] data = new int[pids.length][];
         StringBuilder replies = new StringBuilder();
-        command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
+        String headerReply = command(FORD_PCM_HEADER, AT_TIMEOUT_MS);
         try {
+            if (!isOk(headerReply)) {
+                lastEnhancedReply = "adapter refused the PCM header: " + clean(headerReply);
+                return data;
+            }
             for (int i = 0; i < pids.length; i++) {
                 String reply = command("22" + pids[i], PID_TIMEOUT_MS);
                 if (replies.length() > 0) replies.append(" | ");
@@ -401,7 +462,7 @@ public class ELM327Adapter {
                 data[i] = parseReply(reply, "62" + pids[i]);
             }
         } finally {
-            command(OBD_PWM_HEADER, AT_TIMEOUT_MS);
+            restoreObdHeader();
         }
         lastEnhancedReply = replies.toString();
         return data;

@@ -28,6 +28,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
@@ -55,6 +57,7 @@ import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
+import com.autosentry.app.util.Backup;
 import com.autosentry.app.util.TabletFiles;
 
 import java.io.IOException;
@@ -132,6 +135,9 @@ public class MainActivity extends AppCompatActivity {
             buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
             buttonSaveTrips, buttonSystemsScan, buttonScanCodes, buttonClearCodes;
 
+    private final ActivityResultLauncher<String[]> pickBackupFile =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::confirmRestore);
+
     /** Set by the service-alert notification so tapping it lands on the History tab. */
     public static final String EXTRA_OPEN_SERVICE_TAB = "open_service_tab";
 
@@ -208,7 +214,13 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.buttonZoomOut).setOnClickListener(v -> changeTileColumns(1));
         findViewById(R.id.buttonInfo).setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle("AutoSentry")
-                .setMessage("Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")")
+                .setMessage("Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")\n\n"
+                        + (BuildConfig.PERSISTENT_KEY
+                        ? "Signed with AutoSentry's persistent key. Newer builds install over this one and keep your data."
+                        : "TEST BUILD, signed with a throwaway key. It can't update a regular AutoSentry install, and a "
+                        + "regular build can't update it: Android will ask to uninstall first, which erases the data. "
+                        + "Back up first (Account tab).")
+                        + "\n\nDatabase version " + AppDatabase.VERSION + ".")
                 .setPositiveButton("OK", null)
                 .show());
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
@@ -224,6 +236,8 @@ public class MainActivity extends AppCompatActivity {
         buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
         buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
         buttonSaveTrips.setOnClickListener(v -> saveTripsToTablet());
+        findViewById(R.id.buttonBackup).setOnClickListener(v -> backUpEverything());
+        findViewById(R.id.buttonRestore).setOnClickListener(v -> pickBackupFile.launch(new String[]{"application/zip", "application/octet-stream"}));
         buttonScanCodes.setOnClickListener(v -> requestCodeScan());
         buttonClearCodes.setOnClickListener(v -> confirmClearCodes());
         buttonSystemsScan.setOnClickListener(v -> startActivity(new Intent(this, SystemsScanActivity.class)));
@@ -551,6 +565,83 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Every trip, and every once-a-second point in it, as two CSV files on the tablet. No internet needed. */
+    private void backUpEverything() {
+        Toast.makeText(this, "Backing up…", Toast.LENGTH_SHORT).show();
+        ioExecutor.execute(() -> {
+            String message;
+            try {
+                message = "Backup saved to " + Backup.export(this) + ". Copy it off the tablet to keep it safe.";
+            } catch (IOException | RuntimeException e) {
+                message = "Couldn't back up: " + e.getMessage();
+            }
+            String text = message;
+            uiHandler.post(() -> showNotice("Backup", text, null));
+        });
+    }
+
+    private void showNotice(String title, String text, Runnable afterOk) {
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this).setTitle(title).setMessage(text).setCancelable(false)
+                .setPositiveButton("OK", (d, w) -> {
+                    if (afterOk != null) afterOk.run();
+                })
+                .show();
+    }
+
+    private void confirmRestore(Uri file) {
+        if (file == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Replace everything with this backup?")
+                .setMessage("The trips, maintenance records, photos and settings on this tablet now will be replaced by "
+                        + "the ones in the backup. What is here now is saved to Downloads/AutoSentry first, so you can "
+                        + "go back. Tracking stops, and AutoSentry closes when it's done.")
+                .setPositiveButton("Restore", (d, w) -> restoreBackup(file))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /**
+     * Stops tracking, saves what's here now, then swaps in the backup. The app closes
+     * afterwards because every open screen still holds the old data.
+     */
+    private void restoreBackup(Uri file) {
+        Backup.restoring = true;
+        stopService(new Intent(this, TrackingService.class));
+        Toast.makeText(this, "Restoring…", Toast.LENGTH_LONG).show();
+        ioExecutor.execute(() -> {
+            String message;
+            boolean done = false;
+            try {
+                // The service writes its last trip numbers on its own thread as it stops.
+                for (int i = 0; i < 50 && TrackingService.isRunning; i++) Thread.sleep(100);
+                Thread.sleep(1500);
+                String safety = Backup.export(this);
+                try (java.io.InputStream in = getContentResolver().openInputStream(file)) {
+                    if (in == null) throw new IOException("Couldn't open that file.");
+                    message = Backup.restore(this, in) + "\n\nWhat was here before is in " + safety
+                            + ".\n\nAutoSentry will close now. Open it again to carry on.";
+                    done = true;
+                }
+            } catch (IOException | RuntimeException e) {
+                message = e.getMessage();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                message = "The restore was interrupted before anything was replaced.";
+            }
+            String text = message;
+            boolean restart = done;
+            uiHandler.post(() -> showNotice(restart ? "Restored" : "Not restored", text, () -> {
+                Backup.restoring = false;
+                if (restart) {
+                    finishAffinity();
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                } else {
+                    maybeAutoStartTracking();
+                }
+            }));
+        });
+    }
+
     private void saveTripsToTablet() {
         ioExecutor.execute(() -> {
             String stamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());

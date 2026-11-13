@@ -21,8 +21,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         MaintenanceAttachment.class,
         KoeoReport.class
     },
-    version = 4,
-    exportSchema = false
+    version = AppDatabase.VERSION,
+    exportSchema = true
 )
 public abstract class AppDatabase extends RoomDatabase {
     public abstract PIDDefinitionDao pidDefinitionDao();
@@ -107,20 +107,36 @@ public abstract class AppDatabase extends RoomDatabase {
         return false;
     }
 
+    public static final String DB_NAME = "autosentry.db";
+    /** The layout version this build reads and writes. A backup from a higher one can't be restored. */
+    public static final int VERSION = 4;
+
     private static volatile AppDatabase INSTANCE;
 
     public static AppDatabase getInstance(Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
-                if (INSTANCE == null) {
-                    INSTANCE = Room.databaseBuilder(
-                            context.getApplicationContext(),
-                            AppDatabase.class,
-                            "autosentry.db"
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
-                }
+                if (INSTANCE == null) INSTANCE = open(context, DB_NAME);
             }
         }
         return INSTANCE;
+    }
+
+    /**
+     * Opens (and, for an older file, migrates) a database. There is deliberately no
+     * fallbackToDestructiveMigration: a layout Room can't migrate must fail loudly, never
+     * wipe the truck's history. MigrationTest opens old-version files through here.
+     */
+    static AppDatabase open(Context context, String name) {
+        return Room.databaseBuilder(context.getApplicationContext(), AppDatabase.class, name)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
+    }
+
+    /** Closes the shared instance so the file can be copied or replaced (backup restore). */
+    public static void closeInstance() {
+        synchronized (AppDatabase.class) {
+            if (INSTANCE != null) INSTANCE.close();
+            INSTANCE = null;
+        }
     }
 }

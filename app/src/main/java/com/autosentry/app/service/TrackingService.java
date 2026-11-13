@@ -213,7 +213,7 @@ public class TrackingService extends Service {
      * Used by app launch, boot, the Bluetooth receiver and the watchdog.
      */
     public static void startIfEnabled(Context context, String why) {
-        if (isRunning) return;
+        if (isRunning || com.autosentry.app.util.Backup.restoring) return;
         if (!AppSettings.isAutoTrackingEnabled(context) || AppSettings.isTrackingPaused(context)) return;
         if (!AppSettings.hasObdAdapterConfigured(context)) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S

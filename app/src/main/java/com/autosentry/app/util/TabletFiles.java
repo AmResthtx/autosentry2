@@ -34,19 +34,32 @@ public final class TabletFiles {
         return save(context, fileName, out -> out.write(text));
     }
 
+    public interface BinaryBody {
+        void write(OutputStream out) throws IOException;
+    }
+
     /** Returns where the file went, for the user. */
     public static String save(Context context, String fileName, Body body) throws IOException {
+        String mime = fileName.endsWith(".csv") ? "text/csv"
+                : fileName.endsWith(".json") ? "application/json" : "text/plain";
+        return saveBinary(context, fileName, mime, stream -> write(stream, body));
+    }
+
+    /** Like {@link #save}, for files that aren't text (the backup zip). */
+    public static String saveBinary(Context context, String fileName, String mime, BinaryBody body) throws IOException {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ContentValues values = new ContentValues();
             values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-            values.put(MediaStore.Downloads.MIME_TYPE, fileName.endsWith(".csv") ? "text/csv"
-                    : fileName.endsWith(".json") ? "application/json" : "text/plain");
+            values.put(MediaStore.Downloads.MIME_TYPE, mime);
             values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + FOLDER);
             Uri uri = context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
             if (uri == null) throw new IOException("Downloads folder refused " + fileName);
             try (OutputStream stream = context.getContentResolver().openOutputStream(uri)) {
                 if (stream == null) throw new IOException("Couldn't open " + fileName);
-                write(stream, body);
+                body.write(stream);
+            } catch (IOException | RuntimeException e) {
+                context.getContentResolver().delete(uri, null, null); // no half-written file left behind
+                throw e;
             }
             return Environment.DIRECTORY_DOWNLOADS + "/" + FOLDER + "/" + fileName;
         }
@@ -54,7 +67,7 @@ public final class TabletFiles {
         if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
         File file = new File(dir, fileName);
         try (OutputStream stream = new FileOutputStream(file)) {
-            write(stream, body);
+            body.write(stream);
         }
         return file.getAbsolutePath();
     }

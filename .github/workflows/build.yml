@@ -55,34 +55,113 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run unit tests
-        run: ./gradlew testDebugUnitTest
-
-      - name: Prepare persistent release signing key
-        if: github.event_name == 'push' && github.ref_type == 'branch'
+      # One persistent key signs every installable APK, so each build installs over the last
+      # one and keeps its data (docs/UPDATES.md). The key lives only in repository secrets.
+      # A fork's pull request can't read secrets: it still builds, with a throwaway test key,
+      # and the APK is named TESTKEY so nobody installs it over the real app by mistake.
+      - name: Prepare persistent signing key
+        id: key
         env:
           KEYSTORE_BASE64: ${{ secrets.AUTOSENTRY_RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
         run: |
-          : "${KEYSTORE_BASE64:?Add the persistent release keystore as AUTOSENTRY_RELEASE_KEYSTORE_BASE64}"
-          : "${STORE_PASSWORD:?Add AUTOSENTRY_RELEASE_STORE_PASSWORD}"
-          : "${KEY_ALIAS:?Add AUTOSENTRY_RELEASE_KEY_ALIAS}"
-          : "${KEY_PASSWORD:?Add AUTOSENTRY_RELEASE_KEY_PASSWORD}"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/autosentry-release.jks"
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/autosentry-release.jks"
+            echo "AUTOSENTRY_RELEASE_STORE_FILE=${RUNNER_TEMP}/autosentry-release.jks" >> "$GITHUB_ENV"
+            echo "persistent=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error::Signing secrets are missing. Add AUTOSENTRY_RELEASE_KEYSTORE_BASE64, AUTOSENTRY_RELEASE_STORE_PASSWORD, AUTOSENTRY_RELEASE_KEY_ALIAS and AUTOSENTRY_RELEASE_KEY_PASSWORD (docs/UPDATES.md)."
+            exit 1
+          else
+            echo "::warning::No signing secrets in this run (fork or Dependabot pull request). The APK is signed with a throwaway test key and cannot update an installed AutoSentry."
+            echo "persistent=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run unit tests
+        env:
+          AUTOSENTRY_RELEASE_STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
+          AUTOSENTRY_RELEASE_KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
+          AUTOSENTRY_RELEASE_KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
+        run: ./gradlew testDebugUnitTest
+
+      # Room writes the database layout to app/schemas on every build. If it differs from the
+      # committed file, the layout changed: that needs a new database version and a Migration,
+      # or the next update crashes on the tablet's existing data.
+      - name: Check the database layout is the committed one
+        run: |
+          if [ -n "$(git status --porcelain app/schemas)" ]; then
+            echo "::error::The database layout changed. Bump AppDatabase's version, add a Migration, extend MigrationTest, and commit the new file under app/schemas."
+            git status --porcelain app/schemas
+            for f in $(git ls-files --others --modified app/schemas); do
+              echo "----- BEGIN $f"; cat "$f"; echo; echo "----- END $f"
+            done
+            exit 1
+          fi
 
       - name: Build release APK
         if: github.event_name == 'push' && github.ref_type == 'branch'
         env:
-          AUTOSENTRY_RELEASE_STORE_FILE: ${{ runner.temp }}/autosentry-release.jks
           AUTOSENTRY_RELEASE_STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
           AUTOSENTRY_RELEASE_KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
           AUTOSENTRY_RELEASE_KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Build debug APK
+        env:
+          AUTOSENTRY_RELEASE_STORE_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_STORE_PASSWORD }}
+          AUTOSENTRY_RELEASE_KEY_ALIAS: ${{ secrets.AUTOSENTRY_RELEASE_KEY_ALIAS }}
+          AUTOSENTRY_RELEASE_KEY_PASSWORD: ${{ secrets.AUTOSENTRY_RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleDebug
+
+      # Names the APK after its version and prints which key signed it. Two builds update each
+      # other in place only when this fingerprint is the same.
+      - name: Name the APK and show its signing key
+        id: apk
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          BUILD=${{ github.run_number }}
+          KEY=$([ "${{ steps.key.outputs.persistent }}" = "true" ] && echo "" || echo "-TESTKEY")
+          NAME="AutoSentry-v${VERSION}-build${BUILD}${KEY}-debug"
+          cp app/build/outputs/apk/debug/app-debug.apk "${NAME}.apk"
+          CERT=$("${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --print-certs "${NAME}.apk" | grep -m1 'SHA-256' | sed 's/.*: //')
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${NAME}.apk"
+            echo "- Build number (versionCode): ${BUILD}"
+            echo "- Signing key SHA-256: \`${CERT}\`"
+            if [ -z "$KEY" ]; then
+              echo "- Signed with the persistent key: installs over any earlier persistent-key build and keeps its data."
+            else
+              echo "- Signed with a throwaway test key: it will NOT install over the real app."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Every run, pull requests included, leaves an APK to sideload. GitHub wraps artifacts
+      # in a zip: download it from the run's page, unzip, and tap the APK.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.name }}.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Android refuses an APK whose build number is lower than the installed one. The run
+      # number only goes down if this workflow file is renamed or recreated; stop that here
+      # rather than on the tablet.
+      - name: Check the build number is above the last release
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LAST=$(gh release list --limit 100 --json tagName --jq '[.[].tagName | capture("-build(?<n>[0-9]+)$").n | tonumber] | max // 0')
+          echo "Last released build: ${LAST}; this build: ${{ github.run_number }}"
+          if [ "${{ github.run_number }}" -le "${LAST}" ]; then
+            echo "::error::Build ${{ github.run_number }} is not above the last release (build ${LAST}). It would not install over it. See docs/UPDATES.md."
+            exit 1
+          fi
 
       # Every master push becomes a Release with the APK attached directly (no zip),
       # named to match the version shown in the app's title bar.

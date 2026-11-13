@@ -244,8 +244,8 @@ public final class PidCatalog {
         }
 
         // Ford 7.3L readings (J1850 PWM only). Sources and raw captures: docs/PROVENANCE.md.
-        String scanGauge = "ScanGauge X-Gauge codes for the 7.3L; shulltronics/obd_trucker (MIT)";
-        String oneSource = "shulltronics/obd_trucker PIDs.py (MIT), one author";
+        String scanGauge = "ScanGauge X-Gauge codes for the 7.3L (public forum posts); github.com/shulltronics/obd_trucker";
+        String oneSource = "github.com/shulltronics/obd_trucker PIDs.py, one author";
         ford(FORD_ICP, "1446", 2, "Injection Control Pressure", "psi", "%.0f", b -> word(b) * 0.56).range(0, 4000)
                 .formula("(A*256+B) x 0.56 psi (sources say 0.56 to 0.57)").from(Trust.PUBLISHED, scanGauge);
         ford(FORD_IPR, "1434", 1, "IPR Duty Cycle", "%", "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100)
@@ -263,7 +263,7 @@ public final class PidCatalog {
                 .formula("(A*256+B) / 16 mg per stroke").from(Trust.UNVERIFIED, oneSource);
         ford(FORD_TFT, "11BD", 2, "Trans Fluid Temp (unverified)", "°F", "%.0f", b -> word(b) * -0.0036 + 212.98).range(0, 300)
                 .formula("(A*256+B) x -0.0036 + 212.98 °F, fitted on a 1996 E4OD; may not hold for the 4R100")
-                .from(Trust.UNVERIFIED, "shulltronics/OBD-trucker (MIT), fitted curve").slow();
+                .from(Trust.UNVERIFIED, "github.com/shulltronics/OBD-trucker, fitted curve").slow();
 
         // The 7.3L answers Ford's oil-temp PID, not the standard one; TrackingService picks.
         ALL.get(ENGINE_OIL_TEMP).formula("Standard: A - 40 °C. On the 7.3L: Ford 22 1310, (A*256+B)/100 - 40 °C")

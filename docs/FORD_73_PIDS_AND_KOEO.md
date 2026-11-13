@@ -107,16 +107,24 @@ An Australian BA/BF Falcon PCM (CAN, not PWM) answers the same IDs: 81 = KOEO, 8
 
 ### Getting the missing bytes from this truck
 
-1. **Easiest:** run FORScan for Windows through a PWM-capable USB or Bluetooth adapter.
-   - Log the COM port with a serial port monitor.
-   - Run each PCM test once: KOEO On-Demand, KOEO Injector Electrical, KOER On-Demand, KOER Glow Plug (if offered) and Cylinder Contribution.
-   - Record every `ATSH`/`ST` command, request, reply, poll loop and `3F` keep-alive.
-2. **Passive sniff:** connect a second PWM adapter through an OBD Y-splitter. An OBDLink SX/LX over USB is best.
-   - Send `ATZ ATE0 ATL1 ATS1 ATH1 ATSP1 ATAL ATMA`. Force `ATSP1`, because auto-search transmits.
-   - Raise the baud rate so the adapter doesn't fill its buffer, and timestamp lines on the PC.
-3. **For every test:**
-   - Park with the parking brake on, and run each test twice to confirm the bytes are the same.
-   - Keep the PCM replies (`71` / `73` / `7F`) so the app can tell started, busy and done apart.
+**Changed 2026-11-13 (clean-room rule).** An earlier version of this section said to run
+another vendor's scan tool and log the bytes it sends for each test. That is no longer the
+plan: AutoSentry's requests may come only from public specifications, openly licensed
+projects, and this truck's own answers to requests we wrote ourselves. Recording another
+tool's request bytes would be copying that tool's data. See `docs/PROVENANCE.md`.
+
+What is allowed:
+
+- Public documents: SAE J1979, J2012, J2190, J1850, Ford service publications, and
+  open-source projects whose licence allows reuse (check and record each licence).
+- Read-only probing we design ourselves (`tools/obd_probe.py`, the in-app Systems Scan).
+- Comparing a value or a code list on another tool's screen with AutoSentry's, to check our
+  own work.
+
+What follows from that: the commanded tests (KOEO and KOER self-tests, injector buzz, glow
+plug, cylinder contribution) stay out of the app until their request bytes are found in a
+public source for this PCM. No such source has been found. They are not blocked by missing
+code; they are blocked by missing, publishable evidence, and by the safety rules above.
 
 ## App issues the research turned up
 
@@ -128,7 +136,7 @@ An Australian BA/BF Falcon PCM (CAN, not PWM) answers the same IDs: 81 = KOEO, 8
 - **Silent failures.** There is no `7F` handling in `ELM327Adapter.parseReply`: NRCs, `NO DATA` and timeouts all become NaN. The ATSH replies are not checked for `OK`.
 - **ICP and IPR are advertised without a probe.** They are added to the supported set whenever the bus is PWM (`TrackingService.probeFordOilTemp`).
 - **Link drops while parked.** A key-on, engine-off period longer than 120 s disconnects and resets the adapter (`parkedLongEnough` → `waitForKeyOn`). That would break a multi-step test.
-- **`tools/obd_probe.py` reports false results:**
+- **`tools/obd_probe.py` reported false results (fixed 2026-11-13: PCM header for every Mode 22 ask, refusals told apart from silence, log written line by line; the option that read another tool's PID export was removed):**
   - It sends `CANDIDATE_MODE22_PIDS` without the PCM header, and reports any reply that isn't `NO DATA` as "looks live", including `7F` replies.
   - `--forscan` and `--sweep` do use `ATSHC410F1`, but can't tell a `7F` reply from no answer.
   - The log is only written at exit.

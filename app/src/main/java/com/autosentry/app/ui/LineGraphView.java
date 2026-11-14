@@ -66,6 +66,12 @@ public class LineGraphView extends View {
         this.minLabel = minLabel;
         this.maxLabel = maxLabel;
         this.note = note == null ? "" : note;
+        // Everything here is drawn, not text views, so a screen reader needs it spelled out.
+        StringBuilder spoken = new StringBuilder(title).append(", ").append(valueLabel);
+        if (series != null && series.size() > 0) spoken.append(", ").append(minLabel).append(", ").append(maxLabel);
+        else spoken.append(", no readings in this window");
+        if (!this.note.isEmpty()) spoken.append(". ").append(this.note);
+        setContentDescription(spoken);
         invalidate();
     }
 

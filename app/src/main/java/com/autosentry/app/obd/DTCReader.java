@@ -545,6 +545,9 @@ public final class DTCReader {
             if (tries.size() >= MAX_ATTEMPTS) {
                 if (mode == Mode.FORD_MEMORY) {
                     // Same request, slower: the computer may just need longer than the adapter waits.
+                    // The pause is also where a starting crank is noticed; it comes first.
+                    String stop = link.pauseBeforeRetry();
+                    if (stop != null) return stop;
                     String patient = link.requestFordMemoryPatiently();
                     if (patient != null) tries.add(classify(patient, mode));
                 }

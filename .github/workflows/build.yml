@@ -121,7 +121,9 @@ jobs:
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          BUILD=${{ github.run_number }}
+          # The same number Gradle used: the override when set, else the run number.
+          BUILD="${AUTOSENTRY_VERSION_CODE:-${{ github.run_number }}}"
+          echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
           KEY=$([ "${{ steps.key.outputs.persistent }}" = "true" ] && echo "" || echo "-TESTKEY")
           NAME="AutoSentry-v${VERSION}-build${BUILD}${KEY}-debug"
           cp app/build/outputs/apk/debug/app-debug.apk "${NAME}.apk"
@@ -157,9 +159,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           LAST=$(gh release list --limit 100 --json tagName --jq '[.[].tagName | capture("-build(?<n>[0-9]+)$").n | tonumber] | max // 0')
-          echo "Last released build: ${LAST}; this build: ${{ github.run_number }}"
-          if [ "${{ github.run_number }}" -le "${LAST}" ]; then
-            echo "::error::Build ${{ github.run_number }} is not above the last release (build ${LAST}). It would not install over it. See docs/UPDATES.md."
+          BUILD="${{ steps.apk.outputs.build }}"
+          echo "Last released build: ${LAST}; this build: ${BUILD}"
+          if [ "${BUILD}" -le "${LAST}" ]; then
+            echo "::error::Build ${BUILD} is not above the last release (build ${LAST}). It would not install over it. See docs/UPDATES.md."
             exit 1
           fi
 
@@ -171,7 +174,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          BUILD=${{ github.run_number }}
+          BUILD="${{ steps.apk.outputs.build }}"
           TAG="v${VERSION}-build${BUILD}"
           APK="AutoSentry-${TAG}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$APK"

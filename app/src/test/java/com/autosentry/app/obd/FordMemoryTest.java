@@ -41,7 +41,7 @@ public class FordMemoryTest {
         return hex + String.format(Locale.US, "%02X", crc ^ 0xFF);
     }
 
-    private static final class Link implements DTCReader.Link {
+    private static class Link implements DTCReader.Link {
         final Deque<String> memory = new ArrayDeque<>();
         String patient;
         int asked, patientAsked;
@@ -232,6 +232,45 @@ public class FordMemoryTest {
         DiagnosticCodes.Scan back = DiagnosticCodes.Scan.deserialize(scan.serialize());
         assertEquals(scan.memory.problem, back.memory.problem);
         assertEquals(Outcome.REFUSED, back.memory.outcome);
+    }
+
+    @Test
+    public void aCrankSeenBeforeTheSlowerTryStopsTheRead() throws Exception {
+        final int[] pauses = {0};
+        Link link = new Link() {
+            @Override
+            public String pauseBeforeRetry() {
+                // Two gaps between the three normal tries, then the one before the slower try.
+                return ++pauses[0] == DTCReader.MAX_ATTEMPTS ? DTCReader.ENGINE_STARTED : null;
+            }
+        };
+        link.memory.add("NO DATA\r\r>");
+        link.patient = "53 12 11 00 00 00 00\r>";
+        CodeRead read = DTCReader.readAll(link, true, true);
+        assertEquals(0, link.patientAsked);
+        assertEquals(DTCReader.ENGINE_STARTED, read.stoppedBecause);
+        assertEquals(Outcome.FAILED, read.memory.outcome);
+    }
+
+    @Test
+    public void busyAndStillWorkingAreNotARefusalOfAReading() {
+        assertTrue(ELM327Adapter.isRefusal("7F 22 14 40 00 12\r>", "22"));
+        assertTrue(ELM327Adapter.isRefusal("7F 22 11\r>", "22"));
+        assertFalse(ELM327Adapter.isRefusal("7F 22 14 40 00 21\r>", "22"));
+        assertFalse(ELM327Adapter.isRefusal("7F 22 78\r>", "22"));
+        assertFalse(ELM327Adapter.isRefusal("NO DATA\r>", "22"));
+        assertFalse(ELM327Adapter.isRefusal(null, "22"));
+    }
+
+    @Test
+    public void aReadOnlyScanNeverChangesTheProtocol() throws Exception {
+        FakeElm elm = new FakeElm();
+        ELM327Adapter adapter = new ELM327Adapter(elm.in, elm.out);
+        adapter.setGuard(new ReadOnlyGuard(false, 0, 0, ReadOnlyGuard.SYSTEM_CLOCK));
+        elm.override("0100", "NO DATA");
+        assertTrue(adapter.readSupportedPids().isEmpty());
+        assertEquals(0, elm.count("ATTP1"));
+        assertEquals(0, elm.count("ATSP0"));
     }
 
     // ---- what the adapter is told ----

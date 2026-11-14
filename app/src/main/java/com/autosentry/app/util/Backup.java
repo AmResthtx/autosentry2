@@ -53,6 +53,26 @@ public final class Backup {
         return TabletFiles.saveBinary(app, name, "application/zip", out -> write(app, out));
     }
 
+    /** A dated name for a backup file the user is about to choose a place for. */
+    public static String suggestedName() {
+        return "autosentry-backup-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ".zip";
+    }
+
+    /**
+     * True when {@link #export} can't reach a folder that outlives the app. Before Android 10
+     * it writes under the app's own external folder, which Android deletes on uninstall, and
+     * surviving an uninstall is the whole point of a backup. There the user picks the place
+     * and {@link #exportTo} writes to it.
+     */
+    public static boolean needsChosenDestination() {
+        return android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q;
+    }
+
+    /** Writes a backup zip to a stream the caller opened (a file the user chose). */
+    public static void exportTo(Context context, OutputStream out) throws IOException {
+        write(context.getApplicationContext(), out);
+    }
+
     private static void write(Context app, OutputStream out) throws IOException {
         AppDatabase db = AppDatabase.getInstance(app);
         ZipOutputStream zip = new ZipOutputStream(out);
@@ -135,15 +155,62 @@ public final class Backup {
                     AppDatabase.VERSION);
             if (refusal != null) throw new IOException(refusal);
             checkOpens(stagedDb);
-            return replace(app, staging, stagedDb, manifest, settings);
+            // Both of these can refuse the backup, so both run before anything live is touched.
+            Map<String, Object> decodedSettings = decodeSettings(settings);
+            File checkedDb = prepareDatabase(app, stagedDb);
+            return replace(app, staging, checkedDb, manifest, decodedSettings);
         } finally {
             deleteTree(staging);
+            app.deleteDatabase(CHECK_DB_NAME);
         }
     }
 
+    private static final String CHECK_DB_NAME = "restore-check.db";
+
+    /**
+     * Proves the backup's database is one this app can run on, before it replaces the live
+     * one: a copy is opened by Room itself, which migrates an older layout and then compares
+     * every table with what the app expects. A file that merely looks like a database fails
+     * here, with the live data untouched. Photo paths are then pointed at this install's
+     * photo folder, since the backup may come from a tablet or user profile where the app's
+     * storage sits somewhere else. Returns the checked copy, ready to move into place.
+     */
+    private static File prepareDatabase(Context app, File stagedDb) throws IOException {
+        app.deleteDatabase(CHECK_DB_NAME);
+        File check = app.getDatabasePath(CHECK_DB_NAME);
+        File dir = check.getParentFile();
+        if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
+        copy(stagedDb, check);
+        File stagedWal = new File(stagedDb.getPath() + "-wal");
+        if (stagedWal.isFile()) copy(stagedWal, new File(check.getPath() + "-wal"));
+
+        AppDatabase db = AppDatabase.open(app, CHECK_DB_NAME);
+        try {
+            androidx.sqlite.db.SupportSQLiteDatabase sql = db.getOpenHelper().getWritableDatabase();
+            File photos = new File(app.getFilesDir(), "maintenance_photos");
+            java.util.List<Object[]> moved = new java.util.ArrayList<>();
+            try (android.database.Cursor c = sql.query("SELECT id, filePath FROM maintenance_attachments")) {
+                while (c.moveToNext()) {
+                    String path = c.getString(1);
+                    if (path == null || path.isEmpty()) continue;
+                    String here = new File(photos, new File(path).getName()).getAbsolutePath();
+                    if (!here.equals(path)) moved.add(new Object[]{here, c.getLong(0)});
+                }
+            }
+            for (Object[] row : moved) {
+                sql.execSQL("UPDATE maintenance_attachments SET filePath = ? WHERE id = ?", row);
+            }
+        } catch (RuntimeException e) {
+            throw new IOException("The backup's database isn't one this app can read (" + e.getMessage() + ").");
+        } finally {
+            db.close();
+        }
+        return check;
+    }
+
     /** The point of no return: everything before this only read the backup. */
-    private static String replace(Context app, File staging, File stagedDb, JSONObject manifest, JSONObject settings)
-            throws IOException {
+    private static String replace(Context app, File staging, File stagedDb, JSONObject manifest,
+                                  Map<String, Object> settings) throws IOException {
         try {
             AppDatabase.closeInstance();
             File dbFile = app.getDatabasePath(AppDatabase.DB_NAME);
@@ -220,36 +287,54 @@ public final class Backup {
         }
     }
 
-    private static int applySettings(Context app, JSONObject settings) throws IOException {
-        SharedPreferences.Editor edit = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear();
-        int count = 0;
+    /**
+     * Turns the backup's settings into typed values, or refuses the backup. Runs before
+     * anything is replaced, so damaged settings can't leave the backup's database paired with
+     * this tablet's old settings.
+     */
+    private static Map<String, Object> decodeSettings(JSONObject settings) throws IOException {
+        Map<String, Object> decoded = new java.util.LinkedHashMap<>();
         try {
             JSONArray names = settings.names();
             for (int i = 0; names != null && i < names.length(); i++) {
                 String key = names.getString(i);
                 JSONObject item = settings.getJSONObject(key);
                 switch (item.getString("t")) {
-                    case "b": edit.putBoolean(key, item.getBoolean("v")); break;
-                    case "i": edit.putInt(key, item.getInt("v")); break;
-                    case "l": edit.putLong(key, item.getLong("v")); break;
-                    case "f": edit.putFloat(key, (float) item.getDouble("v")); break;
-                    case "s": edit.putString(key, item.getString("v")); break;
+                    case "b": decoded.put(key, item.getBoolean("v")); break;
+                    case "i": decoded.put(key, item.getInt("v")); break;
+                    case "l": decoded.put(key, item.getLong("v")); break;
+                    case "f": decoded.put(key, (float) item.getDouble("v")); break;
+                    case "s": decoded.put(key, item.getString("v")); break;
                     case "ss": {
                         Set<String> set = new java.util.HashSet<>();
                         JSONArray values = item.getJSONArray("v");
                         for (int j = 0; j < values.length(); j++) set.add(values.getString(j));
-                        edit.putStringSet(key, set);
+                        decoded.put(key, set);
                         break;
                     }
-                    default: continue;
+                    default: throw new IOException("The backup's settings are damaged (unknown kind for " + key + ").");
                 }
-                count++;
             }
         } catch (JSONException e) {
             throw new IOException("The backup's settings are damaged.");
         }
+        return decoded;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int applySettings(Context app, Map<String, Object> settings) throws IOException {
+        SharedPreferences.Editor edit = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear();
+        for (Map.Entry<String, Object> e : settings.entrySet()) {
+            Object v = e.getValue();
+            if (v instanceof Boolean) edit.putBoolean(e.getKey(), (Boolean) v);
+            else if (v instanceof Integer) edit.putInt(e.getKey(), (Integer) v);
+            else if (v instanceof Long) edit.putLong(e.getKey(), (Long) v);
+            else if (v instanceof Float) edit.putFloat(e.getKey(), (Float) v);
+            else if (v instanceof String) edit.putString(e.getKey(), (String) v);
+            else edit.putStringSet(e.getKey(), (Set<String>) v);
+        }
         if (!edit.commit()) throw new IOException("Couldn't save the restored settings.");
-        return count;
+        return settings.size();
     }
 
     private static void putText(ZipOutputStream zip, String name, String text) throws IOException {

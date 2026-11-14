@@ -127,7 +127,7 @@ public abstract class AppDatabase extends RoomDatabase {
      * fallbackToDestructiveMigration: a layout Room can't migrate must fail loudly, never
      * wipe the truck's history. MigrationTest opens old-version files through here.
      */
-    static AppDatabase open(Context context, String name) {
+    public static AppDatabase open(Context context, String name) {
         return Room.databaseBuilder(context.getApplicationContext(), AppDatabase.class, name)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
     }

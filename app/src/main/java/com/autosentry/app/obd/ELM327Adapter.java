@@ -303,7 +303,7 @@ public class ELM327Adapter {
         Set<Integer> supported = new HashSet<>();
         for (int base = 0x00; base <= 0x80; base += 0x20) {
             int[] data = readPid(base, base == 0 ? BUS_INIT_TIMEOUT_MS : PID_TIMEOUT_MS);
-            if (base == 0 && data == null) data = retryOnPwm();
+            if (base == 0 && data == null && guard == null) data = retryOnPwm(); // a read-only scan changes no protocol
             if (data == null || data.length < 4) break;
             long mask = ((long) data[0] << 24) | ((long) data[1] << 16) | ((long) data[2] << 8) | data[3];
             for (int i = 0; i < 32; i++) {
@@ -493,7 +493,10 @@ public class ELM327Adapter {
         if (reply == null) return false;
         for (String rawLine : DTCReader.stripFrames(reply).split("[\\r\\n]+")) {
             String line = rawLine.replace(">", "").replaceAll("\\s", "").toUpperCase(Locale.US);
-            if (line.startsWith("7F" + service)) return true;
+            if (!line.startsWith("7F" + service) || line.length() % 2 != 0) continue;
+            // "Busy, ask again" (21) and "still working" (78) are not a no: they retry normally.
+            String reason = line.length() >= 6 ? line.substring(line.length() - 2) : "";
+            if (!reason.equals("21") && !reason.equals("78")) return true;
         }
         return false;
     }

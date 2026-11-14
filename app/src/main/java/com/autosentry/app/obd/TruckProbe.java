@@ -592,7 +592,16 @@ public final class TruckProbe {
             for (String address : addresses) {
                 if (cancel.cancelled()) break;
                 if (!address.matches("[0-9A-Fa-f]{2}")) continue;
-                a.rawCommand("ATSHC4" + address.toUpperCase(Locale.US) + "F1", AT_MS);
+                String header = a.rawCommand("ATSHC4" + address.toUpperCase(Locale.US) + "F1", AT_MS);
+                if (!ELM327Adapter.isOk(header)) {
+                    // Without the new address the request would go to the previous module
+                    // and its answer would be filed under this one.
+                    String why = "not read: the adapter refused this module's address";
+                    r.item(address + "  " + moduleName(address, proto) + "  " + why + "  [" + oneLine(header) + "]",
+                            ScanReport.fields("address", address, "name", moduleName(address, proto),
+                                    "result", why, "reply", oneLine(header)));
+                    continue;
+                }
                 String reply = a.rawCommand("13", QUERY_MS);
                 DTCReader.Attempt attempt = DTCReader.classify(reply, DTCReader.Mode.FORD_MEMORY);
                 String result;

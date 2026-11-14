@@ -139,6 +139,11 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String[]> pickBackupFile =
             registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::confirmRestore);
 
+    private final ActivityResultLauncher<String> createBackupFile =
+            registerForActivityResult(new ActivityResultContracts.CreateDocument("application/zip"), uri -> {
+                if (uri != null) writeBackup(uri);
+            });
+
     /** Set by the service-alert notification so tapping it lands on the History tab. */
     public static final String EXTRA_OPEN_SERVICE_TAB = "open_service_tab";
 
@@ -568,11 +573,32 @@ public class MainActivity extends AppCompatActivity {
 
     /** Every trip, and every once-a-second point in it, as two CSV files on the tablet. No internet needed. */
     private void backUpEverything() {
+        if (Backup.needsChosenDestination()) {
+            // Android 7 to 9: the app can't write to a folder that survives an uninstall on
+            // its own, so the owner picks where the backup goes.
+            createBackupFile.launch(Backup.suggestedName());
+            return;
+        }
+        writeBackup(null);
+    }
+
+    /** Writes the backup to {@code chosen}, or to Downloads/AutoSentry when null. */
+    private void writeBackup(Uri chosen) {
         Toast.makeText(this, "Backing up…", Toast.LENGTH_SHORT).show();
         ioExecutor.execute(() -> {
             String message;
             try {
-                message = "Backup saved to " + Backup.export(this) + ". Copy it off the tablet to keep it safe.";
+                String where;
+                if (chosen == null) {
+                    where = Backup.export(this);
+                } else {
+                    try (java.io.OutputStream out = getContentResolver().openOutputStream(chosen)) {
+                        if (out == null) throw new IOException("Couldn't open the place you chose.");
+                        Backup.exportTo(this, out);
+                    }
+                    where = "the place you chose";
+                }
+                message = "Backup saved to " + where + ". Copy it off the tablet to keep it safe.";
             } catch (IOException | RuntimeException e) {
                 message = "Couldn't back up: " + e.getMessage();
             }
@@ -614,9 +640,15 @@ public class MainActivity extends AppCompatActivity {
             String message;
             boolean done = false;
             try {
-                // The service writes its last trip numbers on its own thread as it stops.
-                for (int i = 0; i < 50 && TrackingService.isRunning; i++) Thread.sleep(100);
-                Thread.sleep(1500);
+                // The service writes its last trip numbers on its own thread as it stops, behind
+                // whatever request to the adapter is still in flight. Wait for it to say it's done.
+                for (int i = 0; i < 600 && (TrackingService.isRunning || TrackingService.cleanupPending); i++) {
+                    Thread.sleep(100);
+                }
+                if (TrackingService.isRunning || TrackingService.cleanupPending) {
+                    throw new IOException("Tracking didn't finish shutting down, so nothing was replaced. "
+                            + "Close AutoSentry, open it again, and try the restore once more.");
+                }
                 String safety = Backup.export(this);
                 try (java.io.InputStream in = getContentResolver().openInputStream(file)) {
                     if (in == null) throw new IOException("Couldn't open that file.");

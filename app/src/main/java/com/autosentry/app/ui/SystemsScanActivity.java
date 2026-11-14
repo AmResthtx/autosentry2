@@ -21,7 +21,6 @@ import com.autosentry.app.settings.AppSettings;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 
 /**
  * Truck Systems: runs TruckProbe through TrackingService and shows the report
@@ -124,7 +123,7 @@ public class SystemsScanActivity extends AppCompatActivity {
         File file = reportFile();
         if (!file.exists()) return null;
         try {
-            return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+            return com.autosentry.app.util.FileIo.readText(file);
         } catch (IOException e) {
             return null;
         }

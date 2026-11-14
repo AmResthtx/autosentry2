@@ -91,6 +91,12 @@ public class TrackingService extends Service {
 
     /** True from start until destroy; the dashboard uses it for the Start/Stop button. */
     public static volatile boolean isRunning = false;
+    /**
+     * True from start until the service's last database writes (trip totals, key-on report)
+     * have finished after it was stopped. A backup restore waits for this, so the database is
+     * never replaced while the old service still has something to write.
+     */
+    public static volatile boolean cleanupPending = false;
 
     /** Runs the step-by-step adapter check (see runConnectionTest) on the poll thread. */
     public static final String ACTION_RUN_TEST = "com.autosentry.app.RUN_CONNECTION_TEST";
@@ -292,6 +298,7 @@ public class TrackingService extends Service {
             return START_NOT_STICKY;
         }
         realAdapter = new ELM327Adapter(adapterAddress);
+        cleanupPending = true;
         isRunning = true;
         LiveReadings.status = "Connecting to OBD adapter…";
 
@@ -870,10 +877,8 @@ public class TrackingService extends Service {
         try {
             java.io.File dir = new java.io.File(getFilesDir(), SystemsScan.REPORT_DIR);
             if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Couldn't create " + dir);
-            java.nio.file.Files.write(new java.io.File(dir, SystemsScan.REPORT_FILE).toPath(),
-                    result.report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            java.nio.file.Files.write(new java.io.File(dir, SystemsScan.REPORT_JSON).toPath(),
-                    result.json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            com.autosentry.app.util.FileIo.writeText(new java.io.File(dir, SystemsScan.REPORT_FILE), result.report);
+            com.autosentry.app.util.FileIo.writeText(new java.io.File(dir, SystemsScan.REPORT_JSON), result.json);
         } catch (IOException e) {
             AppLog.e(this, TAG, "Couldn't save the systems report", e);
         }
@@ -1080,6 +1085,13 @@ public class TrackingService extends Service {
         want.add(PidCatalog.FUEL_RATE);
         want.add(PidCatalog.ENGINE_OIL_TEMP);
 
+        // A reading that is no longer asked for has no current value. Left in place it would
+        // be graphed and recorded as a flat line that was never measured.
+        LiveReadings.values.keySet().removeIf(id -> {
+            PidCatalog.Pid def = PidCatalog.get(id);
+            return def != null && !def.computed && !want.contains(id)
+                    && !(id == 0x0B && want.contains(PidCatalog.COMPUTED_BOOST));
+        });
         if (want.contains(PidCatalog.COMPUTED_BOOST)) {
             want.add(0x0B); // manifold pressure, and Ford's outside-air pressure when the bus has it
             if (pwmBus) want.add(PidCatalog.FORD_BARO);
@@ -1137,7 +1149,7 @@ public class TrackingService extends Service {
             }
         }
         updateBoost(want);
-        recordAndRemember(now);
+        recordAndRemember(now, LiveReadings.values);
 
         lastConnectedTimestamp = now;
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
@@ -1269,15 +1281,18 @@ public class TrackingService extends Service {
         Double map = LiveReadings.values.get(0x0B);
         Double rpm = LiveReadings.values.get(PidCatalog.RPM);
         if (map != null && rpm != null && rpm == 0) engineOffMapPsi = map;
-        if (!want.contains(PidCatalog.COMPUTED_BOOST)) return;
+        if (!want.contains(PidCatalog.COMPUTED_BOOST)) {
+            LiveReadings.values.remove(PidCatalog.COMPUTED_BOOST);
+            return;
+        }
         Double baro = LiveReadings.values.get(PidCatalog.FORD_BARO);
         double outside = baro != null ? baro : engineOffMapPsi;
         putOrRemove(PidCatalog.COMPUTED_BOOST, map == null || Double.isNaN(outside) ? Double.NaN : map - outside);
     }
 
     /** Feeds the graphs, and the CSV file while recording. A file problem never stops tracking. */
-    private void recordAndRemember(long now) {
-        for (java.util.Map.Entry<Integer, Double> e : LiveReadings.values.entrySet()) {
+    private void recordAndRemember(long now, java.util.Map<Integer, Double> values) {
+        for (java.util.Map.Entry<Integer, Double> e : values.entrySet()) {
             LiveReadings.history.add(e.getKey(), now, e.getValue());
         }
         try {
@@ -1285,7 +1300,7 @@ public class TrackingService extends Service {
             if (recorder != null && (!LiveReadings.recordRequested || now - recorder.startedAt() > MAX_RECORDING_MS)) {
                 stopRecording(LiveReadings.recordRequested ? "Stopped after 6 hours" : null);
             }
-            if (recorder != null) recorder.tick(now, LiveReadings.values);
+            if (recorder != null) recorder.tick(now, values);
         } catch (IOException | RuntimeException e) {
             AppLog.e(this, TAG, "Recording failed", e);
             recorder = null;
@@ -1319,7 +1334,7 @@ public class TrackingService extends Service {
         try {
             done.close();
             String where = TabletFiles.saveBinary(this, file.getName(), "text/csv",
-                    out -> java.nio.file.Files.copy(file.toPath(), out));
+                    out -> com.autosentry.app.util.FileIo.copy(file, out));
             file.delete();
             LiveReadings.recordStatus = prefix + "Saved " + done.rows() + " rows to " + where;
         } catch (IOException | RuntimeException e) {
@@ -1351,6 +1366,17 @@ public class TrackingService extends Service {
         } else {
             LiveReadings.values.put(PidCatalog.RPM, rpm);
         }
+        // The crank is the part of a no-start worth graphing and recording. Only what was
+        // read on this pass goes in; the other readings aren't asked for while cranking.
+        java.util.Map<Integer, Double> fresh = new java.util.HashMap<>();
+        if (rpm != null) fresh.put(PidCatalog.RPM, rpm);
+        if (pwmBus) {
+            putOrRemove(PidCatalog.FORD_ICP, icpIpr[0]);
+            putOrRemove(PidCatalog.FORD_IPR, icpIpr[1]);
+            if (!Double.isNaN(icpIpr[0])) fresh.put(PidCatalog.FORD_ICP, icpIpr[0]);
+            if (!Double.isNaN(icpIpr[1])) fresh.put(PidCatalog.FORD_IPR, icpIpr[1]);
+        }
+        recordAndRemember(now, fresh);
         LiveReadings.status = crankLog.liveLine();
         updateNotification(LiveReadings.status);
         lastConnectedTimestamp = now;
@@ -1514,18 +1540,23 @@ public class TrackingService extends Service {
         LiveReadings.status = stopReason != null ? stopReason : LiveReadings.IDLE_STATUS;
         try {
             ioExecutor.execute(() -> {
-                if (realAdapter != null) realAdapter.disconnect();
-                boolean hadTrip = activeSession != null;
-                if (hadTrip) {
-                    activeSession.endTimestamp = System.currentTimeMillis();
-                    db.sessionDao().update(activeSession);
+                try {
+                    if (realAdapter != null) realAdapter.disconnect();
+                    boolean hadTrip = activeSession != null;
+                    if (hadTrip) {
+                        activeSession.endTimestamp = System.currentTimeMillis();
+                        db.sessionDao().update(activeSession);
+                    }
+                    finishKoeo();
+                    stopRecording("Tracking stopped");
+                    if (profile != null) flushProfile();
+                    if (hadTrip) checkServiceAlerts(); // key-off drops the adapter before the engine-off timer ends the trip
+                } finally {
+                    cleanupPending = false;
                 }
-                finishKoeo();
-                stopRecording("Tracking stopped");
-                if (profile != null) flushProfile();
-                if (hadTrip) checkServiceAlerts(); // key-off drops the adapter before the engine-off timer ends the trip
             });
         } catch (RejectedExecutionException ignored) {
+            cleanupPending = false;
         }
         ioExecutor.shutdown();
     }

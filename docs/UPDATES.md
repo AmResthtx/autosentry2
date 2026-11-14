@@ -35,7 +35,7 @@ and whether the build carries the persistent key or a throwaway test key.
 If the tablet has a pull-request or locally built APK installed from before this change,
 its key differs from the persistent one. Android will refuse the update once. Do this once:
 
-1. Open the installed app. Account tab, **Back up everything**. This needs a build that has
+1. Open the installed app. Account tab, **Back up everything**. On Android 10 and later the file goes to `Downloads/AutoSentry`. On Android 7 to 9 the app asks where to save it; pick a folder outside AutoSentry's own, because Android deletes that one on uninstall. This needs a build that has
    the button. If the installed build is older, use **Save trips to tablet** for the trips;
    maintenance records and photos from that old build can't be carried over.
 2. Copy the backup zip from `Downloads/AutoSentry` off the tablet (USB or cloud), in case.

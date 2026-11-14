@@ -1,0 +1,480 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "076bac8c588f90c0b1a057272dbf6803",
+    "entities": [
+      {
+        "tableName": "pid_definitions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT, `command` TEXT, `pollIntervalSeconds` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "command",
+            "columnName": "command",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pollIntervalSeconds",
+            "columnName": "pollIntervalSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "pid_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `pidName` TEXT, `pidValue` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `sessionId` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pidName",
+            "columnName": "pidName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pidValue",
+            "columnName": "pidValue",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "vehicle_profile",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `odometerMiles` REAL NOT NULL, `milesSinceOilChange` REAL NOT NULL, `engineHoursSinceOilChange` REAL NOT NULL, `oilLifePercent` REAL NOT NULL, `lastOilResetTimestamp` INTEGER NOT NULL, `totalFuelGallons` REAL NOT NULL, `lifetimeAvgMpg` REAL NOT NULL, `severeDuty` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "odometerMiles",
+            "columnName": "odometerMiles",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "milesSinceOilChange",
+            "columnName": "milesSinceOilChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "engineHoursSinceOilChange",
+            "columnName": "engineHoursSinceOilChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "oilLifePercent",
+            "columnName": "oilLifePercent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastOilResetTimestamp",
+            "columnName": "lastOilResetTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalFuelGallons",
+            "columnName": "totalFuelGallons",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lifetimeAvgMpg",
+            "columnName": "lifetimeAvgMpg",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "severeDuty",
+            "columnName": "severeDuty",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startTimestamp` INTEGER NOT NULL, `endTimestamp` INTEGER NOT NULL, `startOdometerMiles` REAL NOT NULL, `distanceMiles` REAL NOT NULL, `fuelGallonsUsed` REAL NOT NULL, `avgMpg` REAL NOT NULL, `maxSpeedMph` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTimestamp",
+            "columnName": "startTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTimestamp",
+            "columnName": "endTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startOdometerMiles",
+            "columnName": "startOdometerMiles",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceMiles",
+            "columnName": "distanceMiles",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fuelGallonsUsed",
+            "columnName": "fuelGallonsUsed",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgMpg",
+            "columnName": "avgMpg",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxSpeedMph",
+            "columnName": "maxSpeedMph",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "trip_points",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `speedMph` REAL NOT NULL, `distanceDeltaMiles` REAL NOT NULL, `rpm` INTEGER NOT NULL, `mafGramsPerSec` REAL NOT NULL, `instantMpg` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speedMph",
+            "columnName": "speedMph",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceDeltaMiles",
+            "columnName": "distanceDeltaMiles",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rpm",
+            "columnName": "rpm",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mafGramsPerSec",
+            "columnName": "mafGramsPerSec",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instantMpg",
+            "columnName": "instantMpg",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "maintenance_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT, `title` TEXT, `notes` TEXT, `timestamp` INTEGER NOT NULL, `odometerAtEvent` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "odometerAtEvent",
+            "columnName": "odometerAtEvent",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "maintenance_attachments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `maintenanceEventId` INTEGER NOT NULL, `filePath` TEXT, `timestamp` INTEGER NOT NULL, `caption` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maintenanceEventId",
+            "columnName": "maintenanceEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "caption",
+            "columnName": "caption",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "koeo_reports",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestamp` INTEGER NOT NULL, `keyOnVolts` REAL NOT NULL, `readings` TEXT, `storedCodes` TEXT, `pendingCodes` TEXT, `storedCodesProblem` TEXT, `pendingCodesProblem` TEXT, `crankAttempts` INTEGER NOT NULL, `crankSeconds` REAL NOT NULL, `minCrankVolts` REAL NOT NULL, `started` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "keyOnVolts",
+            "columnName": "keyOnVolts",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readings",
+            "columnName": "readings",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "storedCodes",
+            "columnName": "storedCodes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pendingCodes",
+            "columnName": "pendingCodes",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "storedCodesProblem",
+            "columnName": "storedCodesProblem",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pendingCodesProblem",
+            "columnName": "pendingCodesProblem",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "crankAttempts",
+            "columnName": "crankAttempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "crankSeconds",
+            "columnName": "crankSeconds",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minCrankVolts",
+            "columnName": "minCrankVolts",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "started",
+            "columnName": "started",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '076bac8c588f90c0b1a057272dbf6803')"
+    ]
+  }
+}

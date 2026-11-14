@@ -49,7 +49,7 @@ public class PidCatalogTest {
         PidCatalog.Pid icp = PidCatalog.get(PidCatalog.FORD_ICP);
         assertTrue(icp.isEnhanced());
         assertEquals(4000, icp.displayMax, 0);
-        assertTrue(Double.isNaN(icp.decode(new int[]{1, 2})));
+        assertEquals(258 * 0.56, icp.decode(new int[]{1, 2}), 1e-9);
     }
 
     @Test

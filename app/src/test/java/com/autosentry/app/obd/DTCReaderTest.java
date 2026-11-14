@@ -283,15 +283,20 @@ public class DTCReaderTest {
     private static final class FakeLink implements DTCReader.Link {
         final Deque<String> stored = new ArrayDeque<>();
         final Deque<String> pending = new ArrayDeque<>();
+        final Deque<String> memory = new ArrayDeque<>();
         final Deque<int[]> pid01 = new LinkedList<>(); // allows null: PID 01 not answering
         final Deque<String> pauses = new ArrayDeque<>();
-        int storedAsked, pendingAsked, pid01Asked, paused;
+        int storedAsked, pendingAsked, memoryAsked, pid01Asked, paused;
 
         @Override
         public String requestCodes(Mode mode) {
             if (mode == Mode.STORED) {
                 storedAsked++;
                 return stored.size() > 1 ? stored.poll() : stored.peek();
+            }
+            if (mode == Mode.FORD_MEMORY) {
+                memoryAsked++;
+                return memory.size() > 1 ? memory.poll() : memory.peek();
             }
             pendingAsked++;
             return pending.size() > 1 ? pending.poll() : pending.peek();
@@ -320,7 +325,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(false, 0));
         link.stored.add("43 00 00 00 00 00 00\r>");
         link.pending.add("47 00 00 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.NONE, read.stored.outcome);
         assertEquals(Outcome.NONE, read.pending.outcome);
         assertEquals(1, link.storedAsked);
@@ -335,7 +340,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(true, 1));
         link.stored.add("43 12 11 00 00 00 00\r>");
         link.pending.add("47 03 40 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Collections.singletonList("P1211"), read.stored.codes);
         assertEquals(Collections.singletonList("P0340"), read.pending.codes);
         assertEquals(1, link.storedAsked);
@@ -348,7 +353,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(false, 0));
         link.stored.add("NO DATA\r>");
         link.pending.add("NO DATA\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.NONE, read.stored.outcome);
         assertEquals(Outcome.NONE, read.pending.outcome);
         assertEquals(3, link.storedAsked);
@@ -361,7 +366,7 @@ public class DTCReaderTest {
         FakeLink link = new FakeLink();
         link.stored.add("NO DATA\r>");
         link.pending.add("NO DATA\r>");
-        CodeRead read = DTCReader.readAll(link, false);
+        CodeRead read = DTCReader.readAll(link, false, false);
         assertEquals(Outcome.FAILED, read.stored.outcome);
         assertEquals(Outcome.FAILED, read.pending.outcome);
         assertEquals(0, link.pid01Asked);
@@ -372,7 +377,7 @@ public class DTCReaderTest {
         FakeLink link = new FakeLink();
         link.stored.add("43 00 00 00 00 00 00\r>");
         link.pending.add("NO DATA\r>");
-        CodeRead read = DTCReader.readAll(link, false);
+        CodeRead read = DTCReader.readAll(link, false, false);
         assertEquals(Outcome.NONE, read.stored.outcome);
         assertEquals(Outcome.NONE, read.pending.outcome);
     }
@@ -384,7 +389,7 @@ public class DTCReaderTest {
         link.stored.add("");
         link.stored.add("43 01 23 00 00 00 00\r>");
         link.pending.add("47 00 00 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.CODES, read.stored.outcome);
         assertEquals(2, read.stored.attempts);
         assertEquals(2, link.storedAsked);
@@ -396,7 +401,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(false, 0));
         link.stored.add("?\r>");
         link.pending.add("47 00 00 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.FAILED, read.stored.outcome);
         assertEquals(DTCReader.MAX_ATTEMPTS, link.storedAsked);
         assertEquals("couldn't read after 3 tries: the adapter didn't understand the request",
@@ -409,7 +414,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(false, 0));
         link.stored.add("43 00 00 00 00 00 00\r>");
         link.pending.add("7F 07 11\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.REFUSED, read.pending.outcome);
         assertEquals(1, link.pendingAsked);
     }
@@ -421,7 +426,7 @@ public class DTCReaderTest {
         link.stored.add("43 01 23 00 00 00 00\r>");
         link.stored.add("43 04 56 00 00 00 00\r>");
         link.pending.add("47 00 00 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.CODES, read.stored.outcome);
         assertEquals(Arrays.asList("P0123", "P0456"), read.stored.codes);
         assertEquals(2, link.storedAsked);
@@ -433,7 +438,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(true, 3));
         link.stored.add("43 01 23 00 00 00 00\r>");
         link.pending.add("47 00 00 00 00 00 00\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(Outcome.FAILED, read.stored.outcome);
         assertEquals(Collections.singletonList("P0123"), read.stored.codes);
         assertEquals(3, link.storedAsked);
@@ -446,7 +451,7 @@ public class DTCReaderTest {
         link.pid01.add(pid01(false, 0));
         link.stored.add("NO DATA\r>");
         link.pending.add("NO DATA\r>");
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertNotNull(read.mil);
         assertEquals(2, link.pid01Asked);
         assertEquals(Outcome.NONE, read.stored.outcome);
@@ -459,7 +464,7 @@ public class DTCReaderTest {
         link.stored.add("NO DATA\r>");
         link.pending.add("NO DATA\r>");
         link.pauses.add(DTCReader.ENGINE_STARTED);
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(DTCReader.ENGINE_STARTED, read.stoppedBecause);
         assertEquals(Outcome.FAILED, read.stored.outcome);
         assertEquals(DTCReader.ENGINE_STARTED, read.stored.problem);
@@ -475,10 +480,99 @@ public class DTCReaderTest {
         FakeLink link = new FakeLink();
         link.pid01.add(null);
         link.pauses.add(DTCReader.ENGINE_STARTED);
-        CodeRead read = DTCReader.readAll(link, true);
+        CodeRead read = DTCReader.readAll(link, true, false);
         assertEquals(DTCReader.ENGINE_STARTED, read.stoppedBecause);
         assertEquals(0, link.storedAsked);
         assertEquals(0, read.stored.attempts);
+    }
+
+    // ---------------------------------------------------------------- Ford memory (service 13)
+
+    private static FakeLink cleanGenericRead() {
+        FakeLink link = new FakeLink();
+        link.pid01.add(pid01(false, 0));
+        link.stored.add("43 00 00 00 00 00 00\r>");
+        link.pending.add("47 00 00 00 00 00 00\r>");
+        return link;
+    }
+
+    @Test
+    public void fordMemoryFindsCodesTheGenericReadMisses() throws Exception {
+        FakeLink link = cleanGenericRead();
+        link.memory.add("53 12 11 04 70\r>");
+        CodeRead read = DTCReader.readAll(link, true, true);
+        assertEquals(Outcome.NONE, read.stored.outcome);
+        assertEquals(Outcome.CODES, read.memory.outcome);
+        assertEquals(Arrays.asList("P1211", "P0470"), read.memory.codes);
+        assertEquals(1, link.memoryAsked);
+
+        DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.of(1L, read);
+        assertTrue(scan.complete());
+        assertEquals("2 codes", scan.countText());
+        for (DTCReader.DtcRecord r : scan.codes) assertEquals(Mode.FORD_MEMORY, r.mode);
+    }
+
+    @Test
+    public void fordMemoryNotAskedOffPwm() throws Exception {
+        FakeLink link = cleanGenericRead();
+        CodeRead read = DTCReader.readAll(link, true, false);
+        assertNull(read.memory);
+        assertEquals(0, link.memoryAsked);
+        assertNull(DiagnosticCodes.Scan.of(1L, read).memory);
+    }
+
+    @Test
+    public void fordMemorySilenceIsNeverNoCodes() throws Exception {
+        FakeLink link = cleanGenericRead();
+        link.memory.add("NO DATA\r\r>");
+        CodeRead read = DTCReader.readAll(link, true, true);
+        assertEquals(Outcome.FAILED, read.memory.outcome);
+        assertEquals(DTCReader.MAX_ATTEMPTS, link.memoryAsked);
+
+        DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.of(1L, read);
+        assertFalse(scan.complete());
+        assertFalse(scan.succeeded());
+        assertEquals("read incomplete", scan.countText());
+        assertEquals("Couldn't read Ford memory codes after 3 tries", scan.problemHeadline());
+        assertEquals("Ford memory codes: the truck didn't answer (the truck's reply: NO DATA).", scan.problemDetail());
+    }
+
+    @Test
+    public void fordMemoryRefusedStillAllowsClear() throws Exception {
+        FakeLink link = cleanGenericRead();
+        link.memory.add("7F 13 11\r>");
+        CodeRead read = DTCReader.readAll(link, true, true);
+        assertEquals(Outcome.REFUSED, read.memory.outcome);
+        assertEquals(1, link.memoryAsked);
+        assertTrue(DiagnosticCodes.Scan.of(1L, read).succeeded());
+    }
+
+    @Test
+    public void fordMemoryCodeAlsoStoredIsListedOnce() throws Exception {
+        FakeLink link = cleanGenericRead();
+        link.stored.clear();
+        link.stored.add("43 12 11 00 00 00 00\r>");
+        link.memory.add("53 12 11\r>");
+        DiagnosticCodes.Scan scan = DiagnosticCodes.Scan.of(1L, DTCReader.readAll(link, false, true));
+        assertEquals(1, scan.codes.size());
+        assertEquals(Mode.STORED, scan.codes.get(0).mode);
+    }
+
+    @Test
+    public void fordMemorySurvivesSaving() {
+        DiagnosticCodes.Scan scan = new DiagnosticCodes.Scan(5L, false,
+                result(Mode.STORED, Outcome.NONE, null, 1),
+                result(Mode.PENDING, Outcome.NONE, null, 1),
+                result(Mode.FORD_MEMORY, Outcome.CODES, null, 1, "P1211"));
+        DiagnosticCodes.Scan back = DiagnosticCodes.Scan.deserialize(scan.serialize());
+        assertNotNull(back);
+        assertEquals(Outcome.CODES, back.memory.outcome);
+        assertEquals(Arrays.asList("P1211"), back.memory.codes);
+        assertEquals(scan.serialize(), back.serialize());
+
+        DiagnosticCodes.Scan old = DiagnosticCodes.Scan.deserialize("2;5;0;;N|1|;N|1|");
+        assertNotNull(old);
+        assertNull(old.memory);
     }
 
     // ---------------------------------------------------------------- saved scans

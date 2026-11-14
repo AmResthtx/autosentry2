@@ -28,6 +28,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
@@ -53,8 +55,10 @@ import com.autosentry.app.obd.DiagnosticCodes;
 import com.autosentry.app.obd.DtcSeverity;
 import com.autosentry.app.obd.LiveReadings;
 import com.autosentry.app.obd.PidCatalog;
+import com.autosentry.app.obd.PollPlan;
 import com.autosentry.app.service.TrackingService;
 import com.autosentry.app.settings.AppSettings;
+import com.autosentry.app.util.Backup;
 import com.autosentry.app.util.TabletFiles;
 
 import java.io.IOException;
@@ -132,6 +136,14 @@ public class MainActivity extends AppCompatActivity {
             buttonSetupWizard, buttonBackgroundAccess, buttonDebugLog, buttonSetOdometer, buttonTestConnection, buttonKoeoCheck,
             buttonSaveTrips, buttonSystemsScan, buttonScanCodes, buttonClearCodes;
 
+    private final ActivityResultLauncher<String[]> pickBackupFile =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::confirmRestore);
+
+    private final ActivityResultLauncher<String> createBackupFile =
+            registerForActivityResult(new ActivityResultContracts.CreateDocument("application/zip"), uri -> {
+                if (uri != null) writeBackup(uri);
+            });
+
     /** Set by the service-alert notification so tapping it lands on the History tab. */
     public static final String EXTRA_OPEN_SERVICE_TAB = "open_service_tab";
 
@@ -204,11 +216,18 @@ public class MainActivity extends AppCompatActivity {
             tabButtons[i].setOnClickListener(v -> showTab(tab));
         }
         buttonEditDashboard.setOnClickListener(v -> showEditDashboard());
+        findViewById(R.id.buttonLiveGraph).setOnClickListener(v -> startActivity(new Intent(this, LiveGraphActivity.class)));
         findViewById(R.id.buttonZoomIn).setOnClickListener(v -> changeTileColumns(-1));
         findViewById(R.id.buttonZoomOut).setOnClickListener(v -> changeTileColumns(1));
         findViewById(R.id.buttonInfo).setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle("AutoSentry")
-                .setMessage("Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")")
+                .setMessage("Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")\n\n"
+                        + (BuildConfig.PERSISTENT_KEY
+                        ? "Signed with AutoSentry's persistent key. Newer builds install over this one and keep your data."
+                        : "TEST BUILD, signed with a throwaway key. It can't update a regular AutoSentry install, and a "
+                        + "regular build can't update it: Android will ask to uninstall first, which erases the data. "
+                        + "Back up first (Account tab).")
+                        + "\n\nDatabase version " + AppDatabase.VERSION + ".")
                 .setPositiveButton("OK", null)
                 .show());
         buttonToggleTracking.setOnClickListener(v -> toggleTracking());
@@ -224,6 +243,8 @@ public class MainActivity extends AppCompatActivity {
         buttonTestConnection.setOnClickListener(v -> withRequiredPermissions(this::showConnectionTest));
         buttonKoeoCheck.setOnClickListener(v -> withRequiredPermissions(this::showKoeoCheck));
         buttonSaveTrips.setOnClickListener(v -> saveTripsToTablet());
+        findViewById(R.id.buttonBackup).setOnClickListener(v -> backUpEverything());
+        findViewById(R.id.buttonRestore).setOnClickListener(v -> pickBackupFile.launch(new String[]{"application/zip", "application/octet-stream"}));
         buttonScanCodes.setOnClickListener(v -> requestCodeScan());
         buttonClearCodes.setOnClickListener(v -> confirmClearCodes());
         buttonSystemsScan.setOnClickListener(v -> startActivity(new Intent(this, SystemsScanActivity.class)));
@@ -551,6 +572,115 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Every trip, and every once-a-second point in it, as two CSV files on the tablet. No internet needed. */
+    private void backUpEverything() {
+        if (Backup.needsChosenDestination()) {
+            // Android 7 to 9: the app can't write to a folder that survives an uninstall on
+            // its own, so the owner picks where the backup goes.
+            createBackupFile.launch(Backup.suggestedName());
+            return;
+        }
+        writeBackup(null);
+    }
+
+    /** Writes the backup to {@code chosen}, or to Downloads/AutoSentry when null. */
+    private void writeBackup(Uri chosen) {
+        Toast.makeText(this, "Backing up…", Toast.LENGTH_SHORT).show();
+        ioExecutor.execute(() -> {
+            String message;
+            try {
+                String where;
+                if (chosen == null) {
+                    where = Backup.export(this);
+                } else {
+                    try (java.io.OutputStream out = getContentResolver().openOutputStream(chosen)) {
+                        if (out == null) throw new IOException("Couldn't open the place you chose.");
+                        Backup.exportTo(this, out);
+                    }
+                    where = "the place you chose";
+                }
+                message = "Backup saved to " + where + ". Copy it off the tablet to keep it safe.";
+            } catch (IOException | RuntimeException e) {
+                message = "Couldn't back up: " + e.getMessage();
+            }
+            String text = message;
+            uiHandler.post(() -> showNotice("Backup", text, null));
+        });
+    }
+
+    private void showNotice(String title, String text, Runnable afterOk) {
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this).setTitle(title).setMessage(text).setCancelable(false)
+                .setPositiveButton("OK", (d, w) -> {
+                    if (afterOk != null) afterOk.run();
+                })
+                .show();
+    }
+
+    private void confirmRestore(Uri file) {
+        if (file == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Replace everything with this backup?")
+                .setMessage("The trips, maintenance records, photos and settings on this tablet now will be replaced by "
+                        + "the ones in the backup. What is here now is saved to Downloads/AutoSentry first, so you can "
+                        + "go back. Tracking stops, and AutoSentry closes when it's done.")
+                .setPositiveButton("Restore", (d, w) -> restoreBackup(file))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /**
+     * Stops tracking, saves what's here now, then swaps in the backup. The app closes
+     * afterwards because every open screen still holds the old data.
+     */
+    private void restoreBackup(Uri file) {
+        Backup.restoring = true;
+        stopService(new Intent(this, TrackingService.class));
+        Toast.makeText(this, "Restoring…", Toast.LENGTH_LONG).show();
+        ioExecutor.execute(() -> {
+            String message;
+            boolean done = false;
+            try {
+                // The service writes its last trip numbers on its own thread as it stops, behind
+                // whatever request to the adapter is still in flight. Wait for it to say it's done.
+                for (int i = 0; i < 600 && (TrackingService.isRunning || TrackingService.cleanupPending); i++) {
+                    Thread.sleep(100);
+                }
+                if (TrackingService.isRunning || TrackingService.cleanupPending) {
+                    throw new IOException("Tracking didn't finish shutting down, so nothing was replaced. "
+                            + "Close AutoSentry, open it again, and try the restore once more.");
+                }
+                String safety = Backup.export(this);
+                try (java.io.InputStream in = getContentResolver().openInputStream(file)) {
+                    if (in == null) throw new IOException("Couldn't open that file.");
+                    message = Backup.restore(this, in) + "\n\nWhat was here before is in " + safety
+                            + ".\n\nAutoSentry will close now. Open it again to carry on.";
+                    done = true;
+                }
+            } catch (IOException | RuntimeException e) {
+                message = e.getMessage();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                message = "The restore was interrupted before anything was replaced.";
+            }
+            String text = message;
+            boolean restart = done;
+            uiHandler.post(() -> {
+                if (!restart) {
+                    Backup.restoring = false; // even if this screen is gone and can't show the notice
+                    maybeAutoStartTracking();
+                } else if (isFinishing() || isDestroyed()) {
+                    android.os.Process.killProcess(android.os.Process.myPid()); // nothing left to show it on
+                }
+                showNotice(restart ? "Restored" : "Not restored", text, () -> {
+                    if (restart) {
+                        finishAffinity();
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    }
+                });
+            });
+        });
+    }
+
     private void saveTripsToTablet() {
         ioExecutor.execute(() -> {
             String stamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
@@ -677,10 +807,9 @@ public class MainActivity extends AppCompatActivity {
             if (value == null && tile.pidId == PidCatalog.COMPUTED_ODOMETER && profile != null) {
                 value = profile.odometerMiles;
             }
-            // Truck has been scanned and confirmed it doesn't answer this one — say so
-            // instead of leaving it blank with no explanation.
-            boolean noAnswer = value == null && def != null && !def.computed
-                    && !supported.isEmpty() && !supported.contains(tile.pidId);
+            // A reading the truck doesn't give says so on its tile, instead of sitting blank.
+            String why = value == null && def != null ? unavailableReason(def, supported) : null;
+            boolean noAnswer = why != null;
 
             GaugeScale.Level level = GaugeScale.Level.OK;
             if (value != null) {
@@ -694,13 +823,44 @@ public class MainActivity extends AppCompatActivity {
                     worstValue = value;
                 }
             }
-            String text = value != null && def != null ? def.formatValue(value) : "--";
+            String text = value != null && def != null ? def.formatValue(value) : (noAnswer ? "no answer" : "--");
             tile.view.setReading(value == null ? Double.NaN : value, text, level, noAnswer);
             tile.view.setContentDescription(tile.name + " " + text + (def == null ? "" : " " + def.unit)
-                    + (noAnswer ? ", not supported by this truck" : ""));
+                    + (noAnswer ? ", " + why : ""));
         }
         updateHealthChip(readings, watch, critical);
         updateAlert(worstDef, worstValue, worstLevel);
+    }
+
+    /**
+     * Why a reading has no value, in the words shown to the owner; null when it simply hasn't
+     * been read yet (or is calculated). Comes from the service's poll plan while the truck is
+     * connected, and from the truck's own list of standard readings otherwise.
+     */
+    private static String unavailableReason(PidCatalog.Pid def, Set<Integer> supported) {
+        if (def.computed) return null;
+        PollPlan.State state = LiveReadings.states.get(def.id);
+        if (state != null) return state.unavailable() ? state.label : null;
+        if (!supported.isEmpty() && !supported.contains(def.id)) return PollPlan.State.NOT_OFFERED.label;
+        return null;
+    }
+
+    /** Everything known about one reading: what is asked, how it's worked out, and how far to trust it. */
+    private void showReadingDetails(PidCatalog.Pid def) {
+        Set<Integer> supported = !LiveReadings.supported.isEmpty()
+                ? LiveReadings.supported : AppSettings.getSupportedPids(this);
+        StringBuilder sb = new StringBuilder();
+        Double value = LiveReadings.values.get(def.id);
+        String why = unavailableReason(def, supported);
+        sb.append("Now: ").append(value != null ? def.formatValue(value) + " " + def.unit
+                : why != null ? "unavailable, " + why : "no reading yet").append("\n\n");
+        sb.append(def.computed ? "Calculated" : "Measured by the truck").append(". ").append(def.trust.explanation).append(".\n\n");
+        if (def.request() != null) sb.append("Asked of the truck: ").append(def.request()).append("\n");
+        sb.append("Formula: ").append(def.formula.isEmpty() ? "the SAE J1979 formula for this reading" : def.formula).append("\n");
+        sb.append("Source: ").append(def.source).append("\n\n");
+        sb.append("A reading is marked confirmed only after its raw replies were captured on this truck and compared "
+                + "with a known-good value (docs/PROVENANCE.md).");
+        new AlertDialog.Builder(this).setTitle(def.label()).setMessage(sb.toString()).setPositiveButton("OK", null).show();
     }
 
     /** One line under the toolbar naming the reading that is furthest out of range. */
@@ -785,10 +945,14 @@ public class MainActivity extends AppCompatActivity {
     private void showTileMenu(int pidId) {
         PidCatalog.Pid def = PidCatalog.get(pidId);
         if (def == null) return;
-        String[] items = {"Move to front", "Move earlier", "Move later", "Remove from dashboard"};
+        String[] items = {"Move to front", "Move earlier", "Move later", "Remove from dashboard", "About this reading"};
         new AlertDialog.Builder(this)
                 .setTitle(def.name)
                 .setItems(items, (dialog, which) -> {
+                    if (which == 4) {
+                        showReadingDetails(def);
+                        return;
+                    }
                     List<Integer> ids = new ArrayList<>(AppSettings.getDashboardPids(this));
                     int i = ids.indexOf(pidId);
                     if (i < 0) return;
@@ -837,9 +1001,12 @@ public class MainActivity extends AppCompatActivity {
         boolean[] checked = new boolean[options.size()];
         for (int i = 0; i < options.size(); i++) {
             PidCatalog.Pid pid = options.get(i);
-            String note = "";
-            if (!pid.computed && supported.isEmpty()) note = "  — not checked on the truck yet";
-            else if (!pid.computed && !supported.contains(pid.id)) note = "  — truck didn't answer";
+            // Each line carries its trust label, and what the truck did when asked.
+            String why = unavailableReason(pid, supported);
+            String note = "  — " + pid.trust.shortLabel;
+            if (why != null) note += ", " + why;
+            else if (LiveReadings.states.get(pid.id) == PollPlan.State.LIVE) note += ", live";
+            else if (!pid.computed && supported.isEmpty()) note += ", not checked on the truck yet";
             labels[i] = pid.label() + note;
             checked[i] = current.contains(pid.id);
         }
@@ -1210,13 +1377,18 @@ public class MainActivity extends AppCompatActivity {
         if (scan != null) {
             String problem = scan.problemHeadline();
             boolean failed = scan.stored.outcome == DTCReader.Outcome.FAILED
-                    || scan.pending.outcome == DTCReader.Outcome.FAILED;
+                    || scan.pending.outcome == DTCReader.Outcome.FAILED
+                    || (scan.memory != null && scan.memory.outcome == DTCReader.Outcome.FAILED);
             if (problem != null) addReadProblem(problem, scan.problemDetail(), failed, busy);
             if (scan.complete() && scan.codes.isEmpty()) {
-                addCodesNote("No stored or pending codes.");
+                addCodesNote(scan.memory == null ? "No stored or pending codes."
+                        : "No stored, pending or Ford memory codes.");
             } else {
                 if (scan.stored.outcome == DTCReader.Outcome.NONE) addCodesNote("No stored codes.");
                 if (scan.pending.outcome == DTCReader.Outcome.NONE) addCodesNote("No pending codes.");
+                if (scan.memory != null && scan.memory.outcome == DTCReader.Outcome.NONE) {
+                    addCodesNote("No Ford memory codes.");
+                }
             }
             for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
         }

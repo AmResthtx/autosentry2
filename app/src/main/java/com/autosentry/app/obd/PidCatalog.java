@@ -26,6 +26,8 @@ public final class PidCatalog {
     public static final int COMPUTED_ODOMETER = 0x1003;
     /** Seconds since the trip started (engine on), shown as h:mm:ss. */
     public static final int COMPUTED_TRIP_TIME = 0x1004;
+    /** Manifold pressure above outside air pressure; see TrackingService for where each half comes from. */
+    public static final int COMPUTED_BOOST = 0x1005;
 
     /** Ford enhanced (Mode 22) readings on the 7.3L's J1850 PWM bus; not standard Mode 01 ids. */
     public static final int FORD_ICP = 0x2000;
@@ -39,6 +41,34 @@ public final class PidCatalog {
     public static final int FORD_EBP = 0x2004;
     public static final int FORD_FPW = 0x2005;
     public static final int FORD_MFDES = 0x2006;
+    public static final int FORD_TFT = 0x2007;
+
+    /**
+     * How far a reading can be trusted. Shown next to every reading in the picker and its
+     * detail sheet, so an unproven number is never mistaken for a proven one. Nothing is
+     * CONFIRMED until its raw replies have been captured on this truck and compared with a
+     * known-good value (docs/PROVENANCE.md says how to promote one).
+     */
+    public enum Trust {
+        CONFIRMED("Confirmed on this truck", "confirmed"),
+        STANDARD("Defined by the OBD-II standard (SAE J1979). Not yet compared on this truck", "standard"),
+        PUBLISHED("Ford-specific, published by several independent sources. Not yet confirmed on this truck", "published"),
+        UNVERIFIED("Ford-specific, one public source only. Treat the number as a guess until checked", "unverified"),
+        CALCULATED("Worked out by AutoSentry from other readings", "calculated");
+
+        public final String explanation;
+        public final String shortLabel;
+
+        Trust(String explanation, String shortLabel) {
+            this.explanation = explanation;
+            this.shortLabel = shortLabel;
+        }
+    }
+
+    /** Readings that change slowly are asked for this often instead of on every pass. */
+    static final long SLOW_MS = 2000L;
+    /** Ford readings need two header changes per batch, so they share one batch a second. */
+    static final long FORD_MS = 1000L;
 
     private static final String DURATION_FORMAT = "duration";
 
@@ -57,8 +87,15 @@ public final class PidCatalog {
         /** Dial scale for readings with no tolerance band; NaN when the reading has no sensible range. */
         public double displayMin = Double.NaN;
         public double displayMax = Double.NaN;
-        /** Four-hex Mode 22 PID decoded generically from {@link #decode}; null for Mode 01 and the hand-decoded ICP/IPR. */
+        /** Four-hex Mode 22 PID read from the PCM and decoded by {@link #decode}; null for Mode 01 readings. */
         public String fordCode;
+        public Trust trust = Trust.STANDARD;
+        /** Where the request and the formula come from. */
+        public String source = "SAE J1979";
+        /** The formula in words, A and B being the first and second data bytes. */
+        public String formula = "";
+        /** How often to ask, in ms; 0 means on every pass. */
+        public long pollMs = 0;
 
         Pid(int id, String name, String unit, int byteCount, String format, boolean computed, Decoder decoder) {
             this.id = id;
@@ -93,7 +130,32 @@ public final class PidCatalog {
         }
 
         public boolean isEnhanced() {
-            return id == FORD_ICP || id == FORD_IPR || fordCode != null;
+            return fordCode != null;
+        }
+
+        /** What is sent to the truck, e.g. "01 0C" or "22 1446 to the PCM (header C4 10 F1)"; null when calculated. */
+        public String request() {
+            if (computed) return null;
+            if (fordCode != null) {
+                return "22 " + fordCode.substring(0, 2) + " " + fordCode.substring(2) + " to the PCM (header C4 10 F1)";
+            }
+            return String.format(java.util.Locale.US, "01 %02X", id);
+        }
+
+        Pid slow() {
+            pollMs = SLOW_MS;
+            return this;
+        }
+
+        Pid formula(String text) {
+            formula = text;
+            return this;
+        }
+
+        Pid from(Trust trust, String source) {
+            this.trust = trust;
+            this.source = source;
+            return this;
         }
 
         public String label() {
@@ -117,23 +179,25 @@ public final class PidCatalog {
         return pid;
     }
 
-    /** Ford enhanced reading: not a Mode 01 id, read by the tracking service over Mode 22. */
-    private static Pid enhanced(int id, String name, String unit, String fmt) {
-        Pid pid = new Pid(id, name, unit, 0, fmt, false, null);
-        ALL.put(id, pid);
-        return pid;
-    }
-
-    /** Experimental Ford Mode 22 reading decoded from its two data bytes. */
-    private static Pid ford(int id, String code, String name, String unit, String fmt, Decoder d) {
-        Pid pid = new Pid(id, name, unit, 2, fmt, false, d);
+    /**
+     * A Ford Mode 22 reading, read straight from the PCM. Adding one is this single line plus
+     * a row in docs/PROVENANCE.md: tools/obd_probe.py --catalog prints both from a capture.
+     */
+    private static Pid ford(int id, String code, int bytes, String name, String unit, String fmt, Decoder d) {
+        Pid pid = new Pid(id, name, unit, bytes, fmt, false, d);
         pid.fordCode = code;
+        pid.pollMs = FORD_MS;
+        pid.trust = Trust.UNVERIFIED;
         ALL.put(id, pid);
         return pid;
     }
 
-    private static void computed(int id, String name, String unit, String fmt) {
-        ALL.put(id, new Pid(id, name, unit, 0, fmt, true, null));
+    private static Pid computed(int id, String name, String unit, String fmt) {
+        Pid pid = new Pid(id, name, unit, 0, fmt, true, null);
+        pid.trust = Trust.CALCULATED;
+        pid.source = "AutoSentry";
+        ALL.put(id, pid);
+        return pid;
     }
 
     static {
@@ -174,21 +238,45 @@ public final class PidCatalog {
         std(0x31, "Distance Since Codes Cleared", "mi", 2, "%.0f", b -> word(b) * 0.621371);
         std(0x4E, "Time Since Codes Cleared", "min", 2, "%.0f", b -> word(b));
 
-        // Ford 7.3L enhanced readings (J1850 PWM only); the decoders live in ELM327Adapter.
-        enhanced(FORD_ICP, "Injection Control Pressure", "psi", "%.0f").range(0, 4000);
-        enhanced(FORD_IPR, "IPR Duty Cycle", "%", "%.0f").range(0, 100);
+        // Slow movers: asked every couple of seconds so the fast ones get the bus.
+        for (int id : new int[]{0x0F, 0x2F, 0x5C, 0x33, 0x46, 0x42, 0x1F, 0x05, 0x01, 0x21, 0x30, 0x31, 0x4E, 0x63}) {
+            ALL.get(id).slow();
+        }
 
-        ford(FORD_MAP, "1440", "MAP (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50);
-        ford(FORD_BARO, "1442", "Barometric (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 20);
-        ford(FORD_EBP, "1445", "Exhaust Back Pressure (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50);
-        ford(FORD_FPW, "1410", "Fuel Pulse Width (unverified)", "ms", "%.2f", b -> word(b) * 0.008).range(0, 5);
-        ford(FORD_MFDES, "1412", "Fuel Desired (unverified)", "mg/stroke", "%.1f", b -> word(b) / 16.0).range(0, 100);
+        // Ford 7.3L readings (J1850 PWM only). Sources and raw captures: docs/PROVENANCE.md.
+        String scanGauge = "ScanGauge X-Gauge codes for the 7.3L (public forum posts); github.com/shulltronics/obd_trucker";
+        String oneSource = "github.com/shulltronics/obd_trucker PIDs.py, one author";
+        ford(FORD_ICP, "1446", 2, "Injection Control Pressure", "psi", "%.0f", b -> word(b) * 0.56).range(0, 4000)
+                .formula("(A*256+B) x 0.56 psi (sources say 0.56 to 0.57)").from(Trust.PUBLISHED, scanGauge);
+        ford(FORD_IPR, "1434", 1, "IPR Duty Cycle", "%", "%.0f", b -> b[0] * 100.0 / 255.0).range(0, 100)
+                .formula("A x 100 / 255 %").from(Trust.PUBLISHED, scanGauge);
 
-        computed(COMPUTED_INSTANT_MPG, "Instant MPG", "mpg", "%.1f");
-        computed(COMPUTED_TRIP_MPG, "Trip Average MPG", "mpg", "%.1f");
-        computed(COMPUTED_TRIP_MILES, "Trip Distance", "mi", "%.1f");
+        ford(FORD_MAP, "1440", 2, "MAP (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50)
+                .formula("(A*256+B) x 0.03625 psi absolute").from(Trust.UNVERIFIED, oneSource);
+        ford(FORD_BARO, "1442", 2, "Barometric (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 20)
+                .formula("(A*256+B) x 0.03625 psi absolute").from(Trust.UNVERIFIED, oneSource).slow();
+        ford(FORD_EBP, "1445", 2, "Exhaust Back Pressure (unverified)", "psi", "%.1f", b -> word(b) * 0.03625).range(0, 50)
+                .formula("(A*256+B) x 0.03625 psi absolute").from(Trust.UNVERIFIED, oneSource);
+        ford(FORD_FPW, "1410", 2, "Fuel Pulse Width (unverified)", "ms", "%.2f", b -> word(b) * 0.008).range(0, 5)
+                .formula("(A*256+B) x 0.008 ms (a x 0.004 claim also exists)").from(Trust.UNVERIFIED, oneSource);
+        ford(FORD_MFDES, "1412", 2, "Fuel Desired (unverified)", "mg/stroke", "%.1f", b -> word(b) / 16.0).range(0, 100)
+                .formula("(A*256+B) / 16 mg per stroke").from(Trust.UNVERIFIED, oneSource);
+        ford(FORD_TFT, "11BD", 2, "Trans Fluid Temp (unverified)", "°F", "%.0f", b -> word(b) * -0.0036 + 212.98).range(0, 300)
+                .formula("(A*256+B) x -0.0036 + 212.98 °F, fitted on a 1996 E4OD; may not hold for the 4R100")
+                .from(Trust.UNVERIFIED, "github.com/shulltronics/OBD-trucker, fitted curve").slow();
+
+        // The 7.3L answers Ford's oil-temp PID, not the standard one; TrackingService picks.
+        ALL.get(ENGINE_OIL_TEMP).formula("Standard: A - 40 °C. On the 7.3L: Ford 22 1310, (A*256+B)/100 - 40 °C")
+                .from(Trust.PUBLISHED, "SAE J1979; on the 7.3L " + scanGauge);
+
+        computed(COMPUTED_INSTANT_MPG, "Instant MPG", "mpg", "%.1f").formula("speed / fuel flow");
+        computed(COMPUTED_TRIP_MPG, "Trip Average MPG", "mpg", "%.1f").formula("trip miles / trip gallons");
+        computed(COMPUTED_TRIP_MILES, "Trip Distance", "mi", "%.1f").formula("speed x engine-on time");
         computed(COMPUTED_TRIP_TIME, "Trip Time", "", DURATION_FORMAT);
-        computed(COMPUTED_ODOMETER, "Odometer", "mi", "%.1f");
+        computed(COMPUTED_ODOMETER, "Odometer", "mi", "%.1f").formula("the odometer you entered + miles driven since");
+        computed(COMPUTED_BOOST, "Boost", "psi", "%.1f").range(-5, 35)
+                .formula("manifold pressure (01 0B) minus outside air pressure: Ford 22 1442 when it answers, "
+                        + "otherwise the manifold pressure seen with the engine off this key cycle");
     }
 
     private PidCatalog() {}

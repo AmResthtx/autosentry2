@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         KoeoReport.class
     },
     version = 3,
-    exportSchema = false
+    exportSchema = true
 )
 public abstract class AppDatabase extends RoomDatabase {
     public abstract PIDDefinitionDao pidDefinitionDao();
@@ -78,6 +78,13 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Every migration, oldest first. A new database version needs its Migration added here;
+     * DatabaseMigrationsTest fails when a schema in app/schemas has no path from the one before.
+     * Never use fallbackToDestructiveMigration(): it silently deletes the owner's history.
+     */
+    static final Migration[] MIGRATIONS = {MIGRATION_1_2, MIGRATION_2_3};
+
     private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
         try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {
             int nameIndex = cursor.getColumnIndex("name");
@@ -98,7 +105,7 @@ public abstract class AppDatabase extends RoomDatabase {
                             context.getApplicationContext(),
                             AppDatabase.class,
                             "autosentry.db"
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build();
+                    ).addMigrations(MIGRATIONS).build();
                 }
             }
         }

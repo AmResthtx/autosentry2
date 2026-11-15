@@ -12,6 +12,8 @@ android {
     val releaseStorePassword = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_PASSWORD").orNull
     val releaseKeyAlias = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_ALIAS").orNull
     val releaseKeyPassword = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_PASSWORD").orNull
+    val hasReleaseKey = releaseStoreFile != null && releaseStorePassword != null &&
+            releaseKeyAlias != null && releaseKeyPassword != null
 
     defaultConfig {
         applicationId = "com.autosentry.app"
@@ -28,12 +30,16 @@ android {
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
+            // Android only updates an app in place, keeping its data, when the new APK has the
+            // same package name and signing key. A release built without the persistent key gets
+            // its own package name, so it can never collide with (and force uninstalling) the
+            // real install on the truck tablet.
+            if (!hasReleaseKey) {
+                applicationIdSuffix = ".local"
+                versionNameSuffix = "-local"
+            }
             signingConfig = signingConfigs.create("stableRelease") {
-                if (releaseStoreFile != null &&
-                    releaseStorePassword != null &&
-                    releaseKeyAlias != null &&
-                    releaseKeyPassword != null
-                ) {
+                if (hasReleaseKey) {
                     storeFile = file(releaseStoreFile)
                     storePassword = releaseStorePassword
                     keyAlias = releaseKeyAlias
@@ -49,6 +55,10 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            // Debug builds are signed with each machine's own debug key, so they install as a
+            // separate "AutoSentry Debug" app instead of conflicting with the real one.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
     compileOptions {
@@ -61,6 +71,15 @@ android {
     buildFeatures {
         viewBinding = false
         buildConfig = true
+    }
+}
+
+kapt {
+    arguments {
+        // Room writes each database version's schema to app/schemas. CI fails if a released
+        // version's schema changes without a version bump and Migration: that would crash
+        // every existing install on update, and reinstalling to recover wipes the data.
+        arg("room.schemaLocation", "$projectDir/schemas")
     }
 }
 

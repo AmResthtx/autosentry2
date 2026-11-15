@@ -193,6 +193,13 @@ The version and build number show in the title bar (e.g. `v0.1.0 (build 41)`). C
 
 Android keeps AutoSentry's local data when an APK is installed as an update. Keep the application ID (`com.autosentry.app`) unchanged, install a build with a higher version code, and sign every update with the same key. Do not uninstall AutoSentry or clear its storage.
 
+**On the truck tablet, install only the APKs from GitHub Releases.** Every release since build 97 is signed with the persistent key (certificate SHA-256 `791d256b…a48183a7`), so each one installs over the last with trips, service history, photos and settings intact. Anything else is built so it can't collide with that install:
+
+- Debug builds (Android Studio, `assembleDebug`, pull-request CI) install as a separate **AutoSentry Debug** app, `com.autosentry.app.debug`, with their own data.
+- A release built without the persistent key gets `com.autosentry.app.local` and a `-local` version, instead of a debug-signed APK that Android would refuse as an update.
+
+The database survives updates through Room migrations, never a destructive fallback. Each version's schema is exported to `app/schemas`. CI fails if a released version's schema changes, and `DatabaseMigrationsTest` fails if a new version has no Migration in `AppDatabase.MIGRATIONS`. To change an entity: bump `version` in `AppDatabase`, add the Migration, and commit the new schema file.
+
 Published GitHub release APKs use a persistent signing keystore. Create a keystore once and store it securely; add its Base64-encoded contents and credentials as repository Actions secrets named `AUTOSENTRY_RELEASE_KEYSTORE_BASE64`, `AUTOSENTRY_RELEASE_STORE_PASSWORD`, `AUTOSENTRY_RELEASE_KEY_ALIAS`, and `AUTOSENTRY_RELEASE_KEY_PASSWORD`. The workflow requires these secrets for branch-push releases. Pull-request builds may use the debug key and should not be used as release updates.
 
 For example, create a new keystore with `keytool -genkeypair -v -keystore autosentry-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias autosentry`, then Base64-encode the file when adding the secret. Never commit the keystore or its passwords. **If the installed app was signed with a different key, the first update signed by this keystore will be rejected by Android.** Use the same original signing key for the transition; if it is unavailable, back up data before uninstalling because the signing key cannot be changed while preserving Android's app data.

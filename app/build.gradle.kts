@@ -12,9 +12,10 @@ android {
     val releaseStorePassword = providers.environmentVariable("AUTOSENTRY_RELEASE_STORE_PASSWORD").orNull
     val releaseKeyAlias = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_ALIAS").orNull
     val releaseKeyPassword = providers.environmentVariable("AUTOSENTRY_RELEASE_KEY_PASSWORD").orNull
-    // Android only installs an update over an app signed with the same key. Every APK meant
-    // for the truck's tablet (release and debug, master and pull request) is signed with this
-    // one persistent key, which lives only in CI secrets. See docs/UPDATES.md.
+    // Android only installs an update over an app signed with the same key. Every APK built
+    // by CI is signed with this one persistent key, which lives only in CI secrets, so each
+    // build updates the one before it. Debug builds are also a separate app (see below).
+    // See docs/UPDATES.md.
     val hasPersistentKey = !releaseStoreFile.isNullOrBlank() && !releaseStorePassword.isNullOrBlank() &&
         !releaseKeyAlias.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank()
 
@@ -51,10 +52,14 @@ android {
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
-            // No key, no signature: an unsigned APK can't be installed, which is the point.
-            // It used to fall back to the debug key, and an APK signed that way installs
-            // fine once but can never be updated by (or update) a properly signed build.
-            signingConfig = if (hasPersistentKey) signingConfigs.getByName("persistent") else null
+            // A release built without the persistent key gets its own package name and the
+            // debug key, so it installs next to the real app and can never collide with (and
+            // force uninstalling) the install on the truck tablet.
+            if (!hasPersistentKey) {
+                applicationIdSuffix = ".local"
+                versionNameSuffix = "-local"
+            }
+            signingConfig = signingConfigs.getByName(if (hasPersistentKey) "persistent" else "debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -62,8 +67,13 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            // With the key present (CI), debug APKs update in place too. Without it (a
-            // developer's PC, a fork's pull request) they get Android's throwaway debug key.
+            // Debug builds (pull-request CI, Android Studio) install as a separate
+            // "AutoSentry Debug" app with their own data, so trying one never touches the real
+            // install. With the key present (CI) they are signed with it, so each debug build
+            // updates the last debug build in place. Without it (a developer's PC, a fork's
+            // pull request) they get that machine's own debug key.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
             if (hasPersistentKey) signingConfig = signingConfigs.getByName("persistent")
         }
     }

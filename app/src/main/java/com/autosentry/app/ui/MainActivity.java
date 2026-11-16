@@ -222,11 +222,14 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.buttonInfo).setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle("AutoSentry")
                 .setMessage("Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")\n\n"
+                        + (BuildConfig.DEBUG
+                        ? "This is AutoSentry Debug, a test build that installs next to the real AutoSentry and keeps "
+                        + "its own data. To try it with your real history: Back up everything in the real app, then "
+                        + "Restore from a backup here.\n\n" : "")
                         + (BuildConfig.PERSISTENT_KEY
-                        ? "Signed with AutoSentry's persistent key. Newer builds install over this one and keep your data."
-                        : "TEST BUILD, signed with a throwaway key. It can't update a regular AutoSentry install, and a "
-                        + "regular build can't update it: Android will ask to uninstall first, which erases the data. "
-                        + "Back up first (Account tab).")
+                        ? "Signed with AutoSentry's persistent key. Newer builds of this app install over it and keep its data."
+                        : "Signed with a throwaway key. A later build can't update it: Android will ask to uninstall "
+                        + "first, which erases this app's data. Back up first (Account tab).")
                         + "\n\nDatabase version " + AppDatabase.VERSION + ".")
                 .setPositiveButton("OK", null)
                 .show());

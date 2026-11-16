@@ -55,8 +55,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # One persistent key signs every installable APK, so each build installs over the last
-      # one and keeps its data (docs/UPDATES.md). The key lives only in repository secrets.
+      # One persistent key signs every APK CI builds, so each release installs over the last
+      # release, and each debug build over the last debug build, keeping its data
+      # (docs/UPDATES.md). Debug builds are a separate app. The key lives only in secrets.
       # A fork's pull request can't read secrets: it still builds, with a throwaway test key,
       # and the APK is named TESTKEY so nobody installs it over the real app by mistake.
       - name: Prepare persistent signing key
@@ -134,9 +135,10 @@ jobs:
             echo "- Build number (versionCode): ${BUILD}"
             echo "- Signing key SHA-256: \`${CERT}\`"
             if [ -z "$KEY" ]; then
-              echo "- Signed with the persistent key: installs over any earlier persistent-key build and keeps its data."
+              echo "- Installs as the separate **AutoSentry Debug** app (com.autosentry.app.debug). It does not replace or touch the real AutoSentry."
+              echo "- Signed with the persistent key: installs over any earlier AutoSentry Debug build from CI and keeps that app's data."
             else
-              echo "- Signed with a throwaway test key: it will NOT install over the real app."
+              echo "- Installs as the separate **AutoSentry Debug** app. Signed with a throwaway test key, so it will not update an earlier AutoSentry Debug build."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

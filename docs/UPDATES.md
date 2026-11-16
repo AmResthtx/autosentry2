@@ -10,12 +10,30 @@ Android refuses the install and offers "uninstall first", and uninstalling erase
 
 | Rule | How AutoSentry meets it |
 |---|---|
-| Same app ID | Always `com.autosentry.app`. |
-| Same signing key | Every APK built by GitHub Actions (releases, and the debug APK on every pull request) is signed with one persistent key. |
+| Same app ID | Releases are always `com.autosentry.app`. Debug builds are always `com.autosentry.app.debug`. |
+| Same signing key | Every APK built by GitHub Actions is signed with one persistent key. |
 | Build number not lower than the installed one | The build number is the GitHub Actions run number, which only goes up. |
 
 The app's Info button (the "i" in the dashboard toolbar) shows the version, the build number,
 and whether the build carries the persistent key or a throwaway test key.
+
+## Two apps: AutoSentry and AutoSentry Debug
+
+- **AutoSentry** (`com.autosentry.app`) is the real one. Install it only from the GitHub
+  Releases page. Each release installs over the last and keeps everything.
+- **AutoSentry Debug** (`com.autosentry.app.debug`) is what a pull-request run or Android
+  Studio builds. It installs next to the real app with its own, separate data. Installing or
+  removing it never touches the real app. Each debug build from GitHub Actions installs over
+  the last one.
+- A release built on a machine without the key becomes `com.autosentry.app.local`, also a
+  separate app.
+
+To try a pull-request build with your real history: in the real app, Account > **Back up
+everything**; in AutoSentry Debug, Account > **Restore from a backup**. The copy is one-way
+and the real app is not changed.
+
+Only one of the two can talk to the OBD adapter at a time. Before testing with AutoSentry
+Debug, stop tracking in the real app (the stop button on its dashboard, then type STOP).
 
 ## What was wrong before
 
@@ -32,8 +50,9 @@ and whether the build carries the persistent key or a throwaway test key.
 
 ## One-time switch (only if the installed app has a different key)
 
-If the tablet has a pull-request or locally built APK installed from before this change,
-its key differs from the persistent one. Android will refuse the update once. Do this once:
+This applies only if the tablet's `com.autosentry.app` was installed from a pull-request or
+locally built APK from before debug builds became a separate app. Its key differs from the
+persistent one, so Android will refuse a release over it. Do this once:
 
 1. Open the installed app. Account tab, **Back up everything**. On Android 10 and later the file goes to `Downloads/AutoSentry`. On Android 7 to 9 the app asks where to save it; pick a folder outside AutoSentry's own, because Android deletes that one on uninstall. This needs a build that has
    the button. If the installed build is older, use **Save trips to tablet** for the trips;

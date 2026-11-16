@@ -97,6 +97,13 @@ public abstract class AppDatabase extends RoomDatabase {
     static final String UNCONFIRMED_NONE =
             "none, not confirmed: read once by an older version that couldn't tell no codes from no answer";
 
+    /**
+     * Every migration, oldest first. A new database version needs its Migration added here;
+     * DatabaseMigrationsTest fails when a schema in app/schemas has no path from the one before.
+     * Never use fallbackToDestructiveMigration(): it silently deletes the owner's history.
+     */
+    static final Migration[] MIGRATIONS = {MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4};
+
     private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
         try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {
             int nameIndex = cursor.getColumnIndex("name");
@@ -129,7 +136,7 @@ public abstract class AppDatabase extends RoomDatabase {
      */
     public static AppDatabase open(Context context, String name) {
         return Room.databaseBuilder(context.getApplicationContext(), AppDatabase.class, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build();
+                .addMigrations(MIGRATIONS).build();
     }
 
     /** Closes the shared instance so the file can be copied or replaced (backup restore). */

@@ -7,8 +7,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * systems scan (see TruckProbe), the same pattern as DiagnosticCodes.
  */
 public final class SystemsScan {
-    /** The last full report, in the app's files folder, so it survives restarts and can be shared. */
+    /** Folder in the app's files where the last report is kept (shared through the FileProvider). */
+    public static final String REPORT_DIR = "reports";
+    /** The last full report, so it survives restarts and can be shared. */
     public static final String REPORT_FILE = "truck_systems_report.txt";
+    /** The same report as JSON. */
+    public static final String REPORT_JSON = "truck_systems_report.json";
+
+    /** Send read requests to the truck; off means listen-only (nothing sent). */
+    public static volatile boolean active = false;
+    /** Show the VIN in the report; hidden by default. */
+    public static volatile boolean includeVin = false;
 
     private static final AtomicBoolean requested = new AtomicBoolean(false);
 

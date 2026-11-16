@@ -58,12 +58,31 @@ public class ELM327Adapter {
     }
 
     private volatile Trace trace = null;
+    // Set only while the systems scan runs: every write is checked against it first.
+    private volatile ReadOnlyGuard guard = null;
+
+    /** Receives each line the adapter hears while monitoring. Return false to stop early. */
+    /** Asked while monitoring; true stops it. */
+    public interface StopCheck {
+        boolean stop();
+    }
+
+    public interface LineSink {
+        boolean line(long atMs, String line);
+    }
 
     public ELM327Adapter(String adapterAddress) {
         this.adapterAddress = adapterAddress;
     }
 
     public ELM327Adapter() {}
+
+    /** For tests: an adapter already connected to these streams. */
+    ELM327Adapter(InputStream in, OutputStream out) {
+        inputStream = in;
+        outputStream = out;
+        connected = true;
+    }
     public void setAdapterAddress(String address) { this.adapterAddress = address; }
 
     public synchronized boolean connect() throws IOException, InterruptedException {
@@ -263,6 +282,60 @@ public class ELM327Adapter {
         return trace;
     }
 
+    /** Installs (or with null, removes) the read-only lock every command must pass. */
+    public void setGuard(ReadOnlyGuard guard) {
+        this.guard = guard;
+    }
+
+    public ReadOnlyGuard getGuard() {
+        return guard;
+    }
+
+    /**
+     * Listens with ATMA for {@code ms}, passing every line heard to {@code sink}.
+     * The adapter transmits nothing on the bus while monitoring. Any character
+     * stops it; a space is used because a bare CR would repeat the last command.
+     * {@code stop} is checked on every pass, so a quiet bus can still be stopped.
+     */
+    public synchronized void monitor(long ms, LineSink sink, StopCheck stop) throws IOException {
+        if (outputStream == null || inputStream == null) throw new IOException("Not connected to adapter");
+        write("ATMA", guard);
+        long deadline = System.currentTimeMillis() + ms;
+        StringBuilder partial = new StringBuilder();
+        byte[] buffer = new byte[512];
+        boolean ended = false; // the adapter stopped on its own (prompt came back)
+        try {
+            while (System.currentTimeMillis() < deadline && !ended && !stop.stop()) {
+                int available = inputStream.available();
+                if (available <= 0) {
+                    sleepBriefly();
+                    continue;
+                }
+                int read = inputStream.read(buffer, 0, Math.min(available, buffer.length));
+                if (read < 0) throw new IOException("Adapter closed the connection");
+                long now = System.currentTimeMillis();
+                for (int i = 0; i < read; i++) {
+                    char c = (char) buffer[i];
+                    if (c == '>') {
+                        ended = true;
+                    } else if (c == '\r' || c == '\n') {
+                        String line = partial.toString().trim();
+                        partial.setLength(0);
+                        if (!line.isEmpty() && !sink.line(now, line)) deadline = 0;
+                    } else {
+                        partial.append(c);
+                    }
+                }
+            }
+        } finally {
+            if (!ended) {
+                outputStream.write(' ');
+                outputStream.flush();
+                readResponse(AT_TIMEOUT_MS); // "STOPPED" and the prompt
+            }
+        }
+    }
+
     /**
      * Any command, for the systems scan. A caller that changes adapter
      * settings (headers, protocol) must reconnect afterwards so ATZ resets them.
@@ -372,21 +445,59 @@ public class ELM327Adapter {
     }
 
     private String command(String cmd, long timeoutMs) throws IOException {
-        sendCommand(cmd);
-        String reply = readResponse(timeoutMs);
-        Trace t = trace;
-        if (t != null) t.exchange(cmd, reply);
-        return reply;
+        ReadOnlyGuard g = guard;
+        for (int attempt = 1; ; attempt++) {
+            write(cmd, g);
+            String reply = readResponse(timeoutMs);
+            boolean again = false;
+            try {
+                // Checked before the trace logs it, so the response time is the adapter's alone.
+                again = g != null && g.afterReply(cmd, reply, attempt);
+            } finally {
+                Trace t = trace;
+                if (t != null) t.exchange(cmd, reply);
+            }
+            if (!again) return reply;
+        }
     }
 
+    /** Writes one command. While a guard is installed, anything it refuses is never written. */
     public synchronized void sendCommand(String cmd) throws IOException {
+        write(cmd, guard);
+    }
+
+    /**
+     * Checks {@code cmd} with the guard, writes it, and tells the guard it went
+     * out. A write that fails partway is reported to the guard as unconfirmed.
+     */
+    private void write(String cmd, ReadOnlyGuard g) throws IOException {
+        if (g != null) g.beforeSend(cmd);
         if (outputStream == null) throw new IOException("Not connected to adapter");
-        // Throw away anything left over from a previous timed-out command.
+        drainInput();
+        try {
+            outputStream.write((cmd + "\r").getBytes());
+            outputStream.flush();
+        } catch (IOException e) {
+            if (g != null) g.writeFailed(cmd);
+            throw e;
+        }
+        if (g != null) g.sent(cmd);
+    }
+
+    /** Throws away anything left over from a previous timed-out command. */
+    private void drainInput() throws IOException {
         while (inputStream != null && inputStream.available() > 0) {
             inputStream.skip(inputStream.available());
         }
-        outputStream.write((cmd + "\r").getBytes());
-        outputStream.flush();
+    }
+
+    private static void sleepBriefly() throws IOException {
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while reading adapter");
+        }
     }
 
     public String readResponse() throws IOException {

@@ -614,27 +614,13 @@
             android:layout_height="match_parent"
             android:visibility="gone">
 
+            <!-- Filled by MainActivity.renderDeals: parts for services coming due, then adapters. -->
             <LinearLayout
+                android:id="@+id/layoutDealsList"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:text="No deals matching alerts" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textSize="14sp"
-                    android:textColor="#757575"
-                    android:text="Deals for parts your service schedule calls for will appear here." />
-            </LinearLayout>
+                android:padding="16dp" />
         </ScrollView>
 
         <!-- ================= ACCOUNT TAB ================= -->

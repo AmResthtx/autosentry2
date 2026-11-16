@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
         MaintenanceAttachment.class,
         KoeoReport.class
     },
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 public abstract class AppDatabase extends RoomDatabase {
@@ -79,11 +79,30 @@ public abstract class AppDatabase extends RoomDatabase {
     };
 
     /**
+     * Adds why a key-on code read failed. Rows from before this read codes once and
+     * couldn't tell "no codes" from no answer, so their "none" is marked unconfirmed.
+     */
+    static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE koeo_reports ADD COLUMN storedCodesProblem TEXT");
+            db.execSQL("ALTER TABLE koeo_reports ADD COLUMN pendingCodesProblem TEXT");
+            db.execSQL("UPDATE koeo_reports SET storedCodesProblem = ? WHERE storedCodes = ''",
+                    new Object[]{UNCONFIRMED_NONE});
+            db.execSQL("UPDATE koeo_reports SET pendingCodesProblem = ? WHERE pendingCodes = ''",
+                    new Object[]{UNCONFIRMED_NONE});
+        }
+    };
+
+    static final String UNCONFIRMED_NONE =
+            "none, not confirmed: read once by an older version that couldn't tell no codes from no answer";
+
+    /**
      * Every migration, oldest first. A new database version needs its Migration added here;
      * DatabaseMigrationsTest fails when a schema in app/schemas has no path from the one before.
      * Never use fallbackToDestructiveMigration(): it silently deletes the owner's history.
      */
-    static final Migration[] MIGRATIONS = {MIGRATION_1_2, MIGRATION_2_3};
+    static final Migration[] MIGRATIONS = {MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4};
 
     private static boolean hasColumn(SupportSQLiteDatabase db, String table, String column) {
         try (Cursor cursor = db.query("PRAGMA table_info(" + table + ")")) {

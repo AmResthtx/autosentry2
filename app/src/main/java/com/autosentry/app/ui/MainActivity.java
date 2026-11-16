@@ -33,6 +33,10 @@ import androidx.core.content.ContextCompat;
 
 import com.autosentry.app.BuildConfig;
 import com.autosentry.app.R;
+import com.autosentry.app.business.BusinessConfig;
+import com.autosentry.app.business.DealsCatalog;
+import com.autosentry.app.business.DealsMatcher;
+import com.autosentry.app.business.PartOffer;
 import com.autosentry.app.data.AppDatabase;
 import com.autosentry.app.data.KoeoReport;
 import com.autosentry.app.data.MaintenanceEvent;
@@ -77,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int TAB_DASHBOARD = 0;
     private static final int TAB_DIAGNOSTICS = 1;
     private static final int TAB_HISTORY = 2;
+    private static final int TAB_DEALS = 3;
     private static final int KOEO_REPORTS_SHOWN = 5;
     private static final String[] TAB_TITLES = {"Dashboard", "Checks", "History", "Deals", "Account"};
     private static final String STOP_CONFIRM_WORD = "STOP";
@@ -115,10 +120,12 @@ public class MainActivity extends AppCompatActivity {
     private TextView textHealth, textAlert;
     private TextView textAdapterStatus, textLiveStatus, textOilLife, textOilDetail, textOdometer,
             textKoeoReports, textMilStatus, textCodesScanInfo;
-    private LinearLayout layoutServiceList, layoutCodesList;
+    private LinearLayout layoutServiceList, layoutCodesList, layoutDealsList;
     private String lastServiceListSignature = "";
+    private String lastDealsSignature = "";
     private String lastCodesSignature = "";
     private DiagnosticCodes.Scan savedCodeScan;
+    private List<DiagnosticCodes.Scan> savedBeforeClear = Collections.emptyList();
     private ImageButton buttonEditDashboard, buttonToggleTracking;
     private Button buttonResetOil,
             buttonLogMaintenance, buttonMaintenanceHistory, buttonPairAdapter, buttonAutoTrackingToggle,
@@ -156,6 +163,7 @@ public class MainActivity extends AppCompatActivity {
         textOilDetail = findViewById(R.id.textOilDetail);
         textOdometer = findViewById(R.id.textOdometer);
         layoutServiceList = findViewById(R.id.layoutServiceList);
+        layoutDealsList = findViewById(R.id.layoutDealsList);
         textMilStatus = findViewById(R.id.textMilStatus);
         textCodesScanInfo = findViewById(R.id.textCodesScanInfo);
         layoutCodesList = findViewById(R.id.layoutCodesList);
@@ -222,6 +230,7 @@ public class MainActivity extends AppCompatActivity {
 
         rebuildTiles();
         savedCodeScan = AppSettings.getLastCodeScan(this);
+        savedBeforeClear = AppSettings.getCodesBeforeClear(this);
         showTab(getIntent().getBooleanExtra(EXTRA_OPEN_SERVICE_TAB, false) ? TAB_HISTORY : TAB_DASHBOARD);
 
         ioExecutor.execute(() -> {
@@ -859,6 +868,7 @@ public class MainActivity extends AppCompatActivity {
     /** History tab: oil life plus every scheduled item, from engine-on distance and time. */
     private void refreshFromDb() {
         final boolean needServiceList = currentTab == TAB_HISTORY;
+        final boolean needDeals = currentTab == TAB_DEALS;
         final boolean needKoeo = currentTab == TAB_DIAGNOSTICS;
         final long trackingStart = AppSettings.getMaintenanceTrackingStart(this);
         final Set<String> hidden = AppSettings.getHiddenServiceItems(this);
@@ -867,7 +877,7 @@ public class MainActivity extends AppCompatActivity {
             if (profile == null) return;
             lastProfile = profile;
 
-            List<ServiceStatus> statuses = needServiceList
+            List<ServiceStatus> statuses = needServiceList || needDeals
                     ? MaintenanceScheduleEngine.computeAll(profile, db.maintenanceDao(), trackingStart,
                             db.sessionDao().milesSince(trackingStart))
                     : null;
@@ -893,7 +903,8 @@ public class MainActivity extends AppCompatActivity {
                 textOilDetail.setText(String.format(Locale.US,
                         "Since last oil change: %,.1f mi, %.1f engine hrs",
                         profile.milesSinceOilChange, profile.engineHoursSinceOilChange));
-                if (statuses != null) renderServiceList(statuses, hidden);
+                if (statuses != null && needServiceList) renderServiceList(statuses, hidden);
+                if (statuses != null && needDeals) renderDeals(statuses, hidden);
                 if (needKoeo) textKoeoReports.setText(koeoText);
             });
         });
@@ -974,6 +985,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addSectionHeader(String label) {
+        addSectionHeader(layoutServiceList, label);
+    }
+
+    private void addSectionHeader(LinearLayout target, String label) {
         float density = getResources().getDisplayMetrics().density;
         TextView header = new TextView(this);
         header.setText(label.toUpperCase(Locale.US));
@@ -982,10 +997,15 @@ public class MainActivity extends AppCompatActivity {
         header.setTextColor(cMuted);
         header.setLetterSpacing(0.06f);
         header.setPadding(0, Math.round(18 * density), 0, Math.round(4 * density));
-        layoutServiceList.addView(header);
+        target.addView(header);
     }
 
     private void addRow(int stripColor, String title, String subtitle, int subtitleColor,
+                        View.OnClickListener onClick, View.OnLongClickListener onLongClick) {
+        addRow(layoutServiceList, stripColor, title, subtitle, subtitleColor, onClick, onLongClick);
+    }
+
+    private void addRow(LinearLayout target, int stripColor, String title, String subtitle, int subtitleColor,
                         View.OnClickListener onClick, View.OnLongClickListener onLongClick) {
         float density = getResources().getDisplayMetrics().density;
         int pad = Math.round(12 * density);
@@ -1032,11 +1052,69 @@ public class MainActivity extends AppCompatActivity {
         chevron.setPadding(pad, 0, Math.round(4 * density), 0);
         row.addView(chevron);
 
-        layoutServiceList.addView(row);
+        target.addView(row);
 
         View divider = new View(this);
         divider.setBackgroundColor(ContextCompat.getColor(this, R.color.fs_divider));
-        layoutServiceList.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        target.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+    }
+
+    // ---------------------------------------------------------------- Deals tab
+
+    /**
+     * Parts for every job at 80% of its interval or past it, most urgent first,
+     * then the supported adapters. Links open in the browser; the app itself
+     * stays offline. Trouble codes never feed this list (see DealsMatcher).
+     */
+    private void renderDeals(List<ServiceStatus> statuses, Set<String> hidden) {
+        List<DealsMatcher.DealGroup> groups = DealsMatcher.match(statuses, hidden);
+        StringBuilder signature = new StringBuilder();
+        for (DealsMatcher.DealGroup g : groups) signature.append('|').append(serviceSubtitle(g.status));
+        if (signature.toString().equals(lastDealsSignature) && layoutDealsList.getChildCount() > 0) return;
+        lastDealsSignature = signature.toString();
+        layoutDealsList.removeAllViews();
+
+        addDealsNote(BusinessConfig.dealsIntro());
+        if (BusinessConfig.anyPaidLinks()) addDealsNote(BusinessConfig.disclosure());
+
+        if (groups.isEmpty()) {
+            addSectionHeader(layoutDealsList, "Coming due");
+            addDealsNote("Nothing is due soon. Parts for a service show up here once it reaches 80% of its "
+                    + "interval, early enough to order them and have them arrive before it's due.");
+        }
+        for (DealsMatcher.DealGroup g : groups) {
+            int color = g.status.overdue ? cCrit : cWarn;
+            addSectionHeader(layoutDealsList, g.status.displayName + " · " + (g.status.overdue ? "overdue" : "due soon")
+                    + (g.status.remainingText().isEmpty() ? "" : " · " + g.status.remainingText()));
+            for (PartOffer offer : g.offers) addOfferRow(offer, color);
+        }
+
+        addSectionHeader(layoutDealsList, "Supported OBD adapters");
+        for (PartOffer offer : DealsCatalog.adapters()) addOfferRow(offer, cMuted);
+    }
+
+    private void addOfferRow(PartOffer offer, int stripColor) {
+        StringBuilder subtitle = new StringBuilder(offer.vendor);
+        if (!offer.label().isEmpty()) subtitle.append(" · ").append(offer.label());
+        if (!offer.note.isEmpty()) subtitle.append(" · ").append(offer.note);
+        addRow(layoutDealsList, stripColor, offer.title, subtitle.toString(), cMuted, v -> openLink(offer.url), null);
+    }
+
+    private void addDealsNote(String text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextSize(13);
+        note.setTextColor(cMuted);
+        note.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
+        layoutDealsList.addView(note);
+    }
+
+    private void openLink(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No browser found to open the link", Toast.LENGTH_LONG).show();
+        }
     }
 
     // ---------------------------------------------------------------- Trouble codes (Checks tab)
@@ -1052,7 +1130,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void confirmClearCodes() {
-        if (!TrackingService.isRunning) {
+        DiagnosticCodes.Scan scan = DiagnosticCodes.lastScan != null ? DiagnosticCodes.lastScan : savedCodeScan;
+        if (!TrackingService.isRunning || scan == null || !scan.succeeded()) {
             Toast.makeText(this, "Turn the key on and tap Scan for Codes first", Toast.LENGTH_LONG).show();
             return;
         }
@@ -1068,7 +1147,8 @@ public class MainActivity extends AppCompatActivity {
                 .setTitle("Clear trouble codes?")
                 .setMessage("This erases the codes, the freeze-frame data saved with them, and resets the readiness "
                         + "monitors (P1000 shows until the truck has been driven enough). If the problem isn't fixed, "
-                        + "the codes come back. Write them down first if a mechanic will need them.")
+                        + "the codes come back. AutoSentry reads the codes once more right before clearing and keeps "
+                        + "that list on this tab; the freeze-frame data is not saved.")
                 .setPositiveButton("Clear Codes", (d, w) -> {
                     DiagnosticCodes.request(DiagnosticCodes.Request.CLEAR);
                     lastCodesSignature = "";
@@ -1080,26 +1160,30 @@ public class MainActivity extends AppCompatActivity {
     /** Rebuilt only when something on it changed, like the service list. */
     private void updateCodesTab() {
         DiagnosticCodes.Scan scan = DiagnosticCodes.lastScan != null ? DiagnosticCodes.lastScan : savedCodeScan;
+        List<DiagnosticCodes.Scan> beforeClear = DiagnosticCodes.beforeClear != null
+                ? DiagnosticCodes.beforeClear : savedBeforeClear;
         boolean busy = DiagnosticCodes.busy;
         String message = DiagnosticCodes.message;
         boolean running = TrackingService.isRunning;
         boolean paired = AppSettings.hasObdAdapterConfigured(this);
-        String signature = (scan == null ? "-" : scan.serialize()) + '|' + busy + '|' + message + '|' + running + '|' + paired;
-        if (signature.equals(lastCodesSignature)) return;
-        lastCodesSignature = signature;
+        StringBuilder signature = new StringBuilder(scan == null ? "-" : scan.serialize())
+                .append('|').append(busy).append('|').append(message).append('|').append(running).append('|').append(paired);
+        for (DiagnosticCodes.Scan s : beforeClear) signature.append('|').append(s.serialize());
+        if (signature.toString().equals(lastCodesSignature)) return;
+        lastCodesSignature = signature.toString();
 
         if (scan == null) {
             textMilStatus.setText("Not scanned yet");
             textMilStatus.setTextColor(getColor(R.color.cyan_display));
         } else {
-            String count = scan.codes.isEmpty() ? "no codes"
-                    : scan.codes.size() + (scan.codes.size() == 1 ? " code" : " codes");
+            String count = scan.countText();
             if (scan.milOn == null) {
                 textMilStatus.setText("Not reported · " + count);
                 textMilStatus.setTextColor(getColor(R.color.cyan_display));
             } else {
                 textMilStatus.setText((scan.milOn ? "ON" : "OFF") + " · " + count);
-                textMilStatus.setTextColor(scan.milOn ? cCrit : cOk);
+                // Light off is only good news when the codes were read too.
+                textMilStatus.setTextColor(scan.milOn ? cCrit : (scan.complete() ? cOk : cWarn));
             }
         }
 
@@ -1118,19 +1202,74 @@ public class MainActivity extends AppCompatActivity {
         textCodesScanInfo.setText(info);
 
         buttonScanCodes.setEnabled(!busy);
-        buttonClearCodes.setEnabled(!busy && scan != null && (!scan.codes.isEmpty() || Boolean.TRUE.equals(scan.milOn)));
+        // Clearing needs a read that worked: the codes about to be erased must be known first.
+        buttonClearCodes.setEnabled(!busy && scan != null && scan.succeeded()
+                && (!scan.codes.isEmpty() || Boolean.TRUE.equals(scan.milOn)));
 
         layoutCodesList.removeAllViews();
-        if (scan == null) return;
-        if (scan.codes.isEmpty()) {
-            TextView none = new TextView(this);
-            none.setText("No stored or pending codes.");
-            none.setTextSize(16);
-            none.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
-            layoutCodesList.addView(none);
-            return;
+        if (scan != null) {
+            String problem = scan.problemHeadline();
+            boolean failed = scan.stored.outcome == DTCReader.Outcome.FAILED
+                    || scan.pending.outcome == DTCReader.Outcome.FAILED;
+            if (problem != null) addReadProblem(problem, scan.problemDetail(), failed, busy);
+            if (scan.complete() && scan.codes.isEmpty()) {
+                addCodesNote("No stored or pending codes.");
+            } else {
+                if (scan.stored.outcome == DTCReader.Outcome.NONE) addCodesNote("No stored codes.");
+                if (scan.pending.outcome == DTCReader.Outcome.NONE) addCodesNote("No pending codes.");
+            }
+            for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
         }
-        for (DTCReader.DtcRecord record : scan.codes) addCodeRow(record);
+        for (DiagnosticCodes.Scan before : beforeClear) addCodesBeforeClear(before);
+    }
+
+    /** A read that fell short says so plainly, with why and a way to try again. Never "no codes". */
+    private void addReadProblem(String headline, String detail, boolean failed, boolean busy) {
+        float density = getResources().getDisplayMetrics().density;
+        TextView title = new TextView(this);
+        title.setText(headline);
+        title.setTextSize(16);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextColor(cWarn);
+        title.setPadding(0, Math.round(8 * density), 0, 0);
+        layoutCodesList.addView(title);
+        if (detail != null) addCodeDetail(layoutCodesList, detail);
+        if (failed) addCodeDetail(layoutCodesList, "This doesn't mean the truck has no codes. Leave the key on and try again.");
+
+        Button retry = new Button(this);
+        retry.setText("Try Again");
+        retry.setEnabled(!busy);
+        retry.setOnClickListener(v -> requestCodeScan());
+        layoutCodesList.addView(retry, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void addCodesNote(String text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextSize(16);
+        note.setPadding(0, Math.round(8 * getResources().getDisplayMetrics().density), 0, 0);
+        layoutCodesList.addView(note);
+    }
+
+    /** What the truck had just before a clear, kept so the clear never loses it. */
+    private void addCodesBeforeClear(DiagnosticCodes.Scan before) {
+        float density = getResources().getDisplayMetrics().density;
+        TextView title = new TextView(this);
+        title.setText("Before clearing " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                .format(new Date(before.timestamp)));
+        title.setTextSize(14);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, Math.round(16 * density), 0, 0);
+        layoutCodesList.addView(title);
+        StringBuilder sb = new StringBuilder("Check engine light ")
+                .append(before.milOn == null ? "not reported" : (before.milOn ? "ON" : "OFF"));
+        if (before.codes.isEmpty()) sb.append(" · no codes");
+        for (DTCReader.DtcRecord record : before.codes) {
+            sb.append("\n").append(record.code).append("  ").append(record.title).append(" (").append(record.mode.label).append(')');
+        }
+        if (before.pending.outcome == DTCReader.Outcome.REFUSED) sb.append("\nPending codes: not available from this truck");
+        addCodeDetail(layoutCodesList, sb.toString());
     }
 
     /** One code with everything it means written out underneath; nothing to tap through. */

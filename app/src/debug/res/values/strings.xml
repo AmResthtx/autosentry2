@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds install next to the real app (package com.autosentry.app.debug). -->
+    <string name="app_name">AutoSentry Debug</string>
+</resources>

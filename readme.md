@@ -25,7 +25,9 @@ Android `INTERNET` permission.
 - [Roadmap](#roadmap)
 - [Honest status](#honest-status)
 - [How it works](#how-it-works)
+- [Truck Systems scan](#truck-systems-scan-read-only)
 - [Building](#building)
+- [Installing updates without losing data](#installing-updates-without-losing-data)
 
 ## Privacy (local-first)
 
@@ -112,11 +114,12 @@ feature are not available yet.
 
 ### Parts deals
 
-The Deals tab is optional: you choose whether to view offers or open their
-links. Offers appear only under a scheduled service item that is due soon or
-overdue, never next to trouble codes. Paid placements are labeled **Sponsored**;
-commission links are labeled **Affiliate link**. Links open in the browser, not
-inside AutoSentry.
+The current Deals tab lists parts for scheduled service and supported adapter
+links; no sponsored placements are currently configured. Future sponsored
+placements will be opt-in: shown only with the owner's permission, clearly
+labeled **Sponsored**, and tied to the scheduled service item. Commission links
+are labeled **Affiliate link**. Service-related offers never appear next to
+trouble codes. Links open in the browser, not inside AutoSentry.
 
 ## Supporting the project
 
@@ -149,13 +152,26 @@ PIDs, including MFDES, are also unverified.
 AutoSentry uses a paired Bluetooth OBD adapter and runs local tracking on the
 device. When automatic tracking is enabled, it checks for the truck in the
 background and records a trip when the engine is running. The dashboard shows
-readings the truck supports; the Truck Systems scan reports what responds.
-The scan is read-only.
+readings the truck supports. The setup wizard helps with permissions, adapter
+selection, connection testing, vehicle information, and dashboard readings.
 
-The app includes a setup wizard for permissions, adapter selection, truck
-connection, vehicle information, and dashboard readings. Adapter and truck
-behavior can vary; an unanswered request is not reported as a successful
-reading.
+Trouble-code reads retry timeouts and incomplete responses. AutoSentry only
+reports “no codes” when the truck has answered sufficiently to confirm that
+result. On J1850 PWM, it also requests Ford continuous-memory codes using a
+published Ford request. That request has not been verified on the 7.3L; if the
+truck does not answer, the app reports a failed read instead of “no codes.”
+Clear Codes is limited to key on, engine off, after a successful read.
+
+### Truck Systems scan (read-only)
+
+By default, the scan listens for 30 seconds and sends no requests to the truck.
+You can choose **Send read requests** to ask the truck for information. The
+scan's read-only guard blocks non-read requests. Reports are saved as text and
+JSON in Downloads/AutoSentry. The VIN is hidden unless you choose to show it.
+
+## Truck Systems scan (read-only)
+
+Open **Truck Systems** in the app and tap Run Scan. By default the scan only listens for 30 seconds and sends the truck nothing. Tick *Send read requests* to also ask the truck (a few minutes). A read-only lock (`ReadOnlyGuard`) sits on the adapter's single write point for the whole scan, and the report lists every request that went out. Each report is saved to Downloads/AutoSentry as text and JSON. The VIN is hidden unless *Show the VIN* is ticked.
 
 ## Building
 
@@ -163,6 +179,17 @@ reading.
 ./gradlew assembleRelease
 ```
 
-The APK is written to `app/build/outputs/apk/release/app-release.apk`. Local
-and pull-request builds use the debug signing key unless release-signing
-credentials are configured.
+The APK is written to `app/build/outputs/apk/release/app-release.apk`. GitHub
+Release APKs use the persistent signing key. Debug builds and local release
+builds install as separate apps, so they do not overwrite the truck's release
+install.
+
+### Installing updates without losing data
+
+Install only APKs from GitHub Releases over the release app on the truck tablet.
+Android preserves local data when an update has the same application ID and
+signing key. Do not uninstall the app or clear its storage to update it.
+
+Debug builds use `com.autosentry.app.debug`; local release builds without the
+persistent key use `com.autosentry.app.local`. Both install separately and
+have separate data. The database is updated through Room migrations.

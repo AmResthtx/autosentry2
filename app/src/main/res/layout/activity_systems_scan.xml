@@ -42,6 +42,23 @@
             android:textStyle="bold"
             android:fontFamily="monospace" />
 
+        <CheckBox
+            android:id="@+id/checkActiveScan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/active_scan_option"
+            android:textColor="@color/textPrimary"
+            android:buttonTint="@color/colorPrimary" />
+
+        <CheckBox
+            android:id="@+id/checkIncludeVin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/include_vin_option"
+            android:textColor="@color/textPrimary"
+            android:buttonTint="@color/colorPrimary" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

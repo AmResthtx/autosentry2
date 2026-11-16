@@ -75,7 +75,7 @@ public class KoeoReport {
         if (result.mode == DTCReader.Mode.STORED) {
             storedCodes = problem != null && codes.isEmpty() ? null : codes;
             storedCodesProblem = problem;
-        } else {
+        } else if (result.mode == DTCReader.Mode.PENDING) {
             pendingCodes = problem != null && codes.isEmpty() ? null : codes;
             pendingCodesProblem = problem;
         }

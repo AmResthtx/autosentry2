@@ -39,7 +39,8 @@ public final class TabletFiles {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ContentValues values = new ContentValues();
             values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-            values.put(MediaStore.Downloads.MIME_TYPE, fileName.endsWith(".csv") ? "text/csv" : "text/plain");
+            values.put(MediaStore.Downloads.MIME_TYPE, fileName.endsWith(".csv") ? "text/csv"
+                    : fileName.endsWith(".json") ? "application/json" : "text/plain");
             values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + FOLDER);
             Uri uri = context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
             if (uri == null) throw new IOException("Downloads folder refused " + fileName);

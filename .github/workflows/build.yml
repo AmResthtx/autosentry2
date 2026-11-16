@@ -58,6 +58,17 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest
 
+      # Room rewrites app/schemas on every build. A diff means an entity changed under an
+      # already-released database version, which crashes every existing install on update.
+      - name: Check the database schema didn't change without a migration
+        run: |
+          if [ -n "$(git status --porcelain -- app/schemas)" ]; then
+            git status --short -- app/schemas
+            git --no-pager diff --stat -- app/schemas
+            echo "::error::Database schema changed. Bump the version in AppDatabase, add a Migration to AppDatabase.MIGRATIONS, and commit the new file in app/schemas."
+            exit 1
+          fi
+
       - name: Prepare persistent release signing key
         if: github.event_name == 'push' && github.ref_type == 'branch'
         env:

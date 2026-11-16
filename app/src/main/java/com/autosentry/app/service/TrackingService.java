@@ -953,7 +953,7 @@ public class TrackingService extends Service {
         }
         DiagnosticCodes.beforeClear = AppSettings.addCodesBeforeClear(this, before);
         AppLog.i(this, TAG, "Codes before clearing (saved): stored " + before.stored.logText()
-                + ", pending " + before.pending.logText() + ", check engine light "
+                + ", pending " + before.pending.logText() + memoryLog(before) + ", check engine light "
                 + (before.milOn == null ? "unknown" : (before.milOn ? "on" : "off")));
 
         boolean cleared = realAdapter.clearTroubleCodes();
@@ -970,11 +970,17 @@ public class TrackingService extends Service {
         AppSettings.setLastCodeScan(this, scan);
         autoScanPending = false;
         AppLog.i(this, TAG, "Trouble codes: stored " + scan.stored.logText() + ", pending " + scan.pending.logText()
+                + memoryLog(scan)
                 + ", check engine light " + (scan.milOn == null ? "unknown" : (scan.milOn ? "on" : "off")));
     }
 
+    private static String memoryLog(DiagnosticCodes.Scan scan) {
+        return scan.memory == null ? "" : ", Ford memory " + scan.memory.logText();
+    }
+
     /**
-     * Light state, stored and pending codes, each retried (see DTCReader.readAll).
+     * Light state, stored and pending codes, and on J1850 PWM Ford's memory codes,
+     * each retried (see DTCReader.readAll).
      * {@code watchCrank} checks RPM between tries and stops if the starter turns,
      * so a retry never holds up timing a crank. Every exchange goes in the debug log.
      */
@@ -998,7 +1004,7 @@ public class TrackingService extends Service {
                 public String pauseBeforeRetry() throws IOException {
                     return pauseBetweenCodeReads(watchCrank);
                 }
-            }, supportedPids.contains(0x01));
+            }, supportedPids.contains(0x01), pwmBus);
         } finally {
             realAdapter.setTrace(previous);
         }

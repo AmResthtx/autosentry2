@@ -534,7 +534,7 @@ public class DTCReaderTest {
         assertFalse(scan.succeeded());
         assertEquals("read incomplete", scan.countText());
         assertEquals("Couldn't read Ford memory codes after 3 tries", scan.problemHeadline());
-        assertEquals("Ford memory codes: the truck didn't answer.", scan.problemDetail());
+        assertEquals("Ford memory codes: the truck didn't answer (the truck's reply: NO DATA).", scan.problemDetail());
     }
 
     @Test

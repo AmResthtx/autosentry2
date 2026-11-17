@@ -53,7 +53,7 @@
     <string name="include_vin_option">Show the VIN in the report</string>
     <string name="run_systems_scan">Run Scan</string>
     <string name="stop_scan">Stop</string>
-    <string name="codes_disclaimer">Severity is AutoSentry\'s guidance from the 7.3L code list, not a diagnosis. Injector driver module codes behind P1316 need a full self-test (FORScan or a Ford scan tool).</string>
+    <string name="codes_disclaimer">Severity is AutoSentry\'s guidance from the 7.3L code list, not a diagnosis. Injector driver module codes behind P1316 need a full self-test with a Ford-capable scan tool.</string>
 
     <!-- Log Maintenance -->
     <string name="service_info">Service Info</string>

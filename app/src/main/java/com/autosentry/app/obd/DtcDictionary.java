@@ -115,7 +115,7 @@ public final class DtcDictionary {
         put(m, "P1296", DtcSeverity.HIGH, "Multiple injector faults, left bank", UVCH_BANK);
         put(m, "P1297", DtcSeverity.HIGH, "Injector bank power circuits shorted together", UVCH_BANK);
         put(m, "P1316", DtcSeverity.MEDIUM, "Injector circuit or injector driver module codes detected",
-                "The injector driver module has its own fault codes; a full self-test (FORScan or a Ford scan tool) reads them. "
+                "The injector driver module has its own fault codes; a full self-test with a Ford-capable scan tool reads them. "
                         + "A common cause is the under-valve-cover harness coming unplugged.");
 
         // ---- Injector driver module (IDM) and cam signal ----

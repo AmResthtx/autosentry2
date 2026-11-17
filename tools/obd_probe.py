@@ -9,9 +9,24 @@ port (no phone/app involved) using the same AT init AutoSentry uses.
 
 Usage:
     Discovery options (find PIDs the app can't read yet):
-       python tools/obd_probe.py --forscan pids.csv   # try PIDs from a FORScan export
+       python tools/obd_probe.py --pids pids.txt      # try a list of 4-hex-digit Mode 22 PIDs
        python tools/obd_probe.py --sweep 1000 1500    # brute-force Mode 22 range (hex)
-    Compare answering PIDs' raw bytes with the value FORScan shows to derive scaling.
+       python tools/obd_probe.py --catalog            # print ready-to-paste catalog lines
+
+    Clean-room rule: the PID list must come from public sources (forum posts, open-source
+    projects with a licence that allows it, SAE documents) or from this truck's own
+    answers. Never feed it another scan tool's PID, module or configuration files.
+    Comparing a reading with the number another tool shows on its screen, to check our
+    own formula, is fine.
+
+    Adding a reading to the app from a capture:
+      1. Run with --catalog (plus --pids or --sweep). Every PID the PCM answers prints
+         a `ford(...)` line for PidCatalog.java and a table row for docs/PROVENANCE.md,
+         both with the raw bytes captured.
+      2. Work out the formula (key on, engine off, a cold-soaked truck gives known
+         values: oil temp = outside temp, MAP = BARO = local barometer).
+      3. Paste the line, fill in the name, unit and formula, set the trust level, and
+         paste the row into docs/PROVENANCE.md with where the formula came from.
 
     1. Pair the OBD adapter to this Windows machine (Settings > Bluetooth),
        key the truck on (accessory or running).
@@ -43,10 +58,78 @@ def log(line=""):
     text = f"[{ts}] {line}" if line else ""
     print(text)
     _log_lines.append(text)
+    # Written as it goes: a dropped Bluetooth link or Ctrl-C loses nothing.
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(text + "\n")
 
 
 def flush_log():
-    LOG_PATH.write_text("\n".join(_log_lines) + "\n", encoding="utf-8")
+    pass  # kept for callers; log() already writes each line
+
+
+PCM_HEADER = "ATSHC410F1"   # Ford's physical address for the PCM on J1850 PWM
+OBD_HEADER = "ATSH616AF1"   # the standard OBD-II functional header
+
+
+def classify_mode22(resp, pid_hex):
+    """What the PCM said to 22 <pid>: ('data', bytes), ('refused', nrc), or ('silent', raw lines).
+
+    A refusal on this PCM is 7F 22 <pid> 00 <reason>: the reason is the last byte.
+    Reason 12 means the PCM doesn't have that PID. Silence and a refusal are different
+    findings and are reported separately.
+    """
+    pid_hex = pid_hex.upper()
+    for raw in clean_lines(resp):
+        line = re.sub(r"\s", "", raw).upper()
+        if line.startswith("62" + pid_hex):
+            payload = line[6:]
+            if payload and len(payload) % 2 == 0:
+                try:
+                    return "data", [int(payload[i:i+2], 16) for i in range(0, len(payload), 2)]
+                except ValueError:
+                    pass
+        if line.startswith("7F22") and len(line) >= 6:
+            return "refused", line[-2:]
+    return "silent", clean_lines(resp)
+
+
+def read_mode22(adapter, pids, catalog=False):
+    """Asks the PCM for each (label, pid) under the PCM header, then restores the OBD header."""
+    answered = []
+    ok = "OK" in adapter.command(PCM_HEADER).upper()
+    if not ok:
+        log("  The adapter refused the PCM header; nothing was sent to the truck.")
+        return answered
+    try:
+        for label, pid_hex in pids:
+            resp = adapter.command(f"22{pid_hex}", timeout=2)
+            kind, detail = classify_mode22(resp, pid_hex)
+            if kind == "data":
+                raw = " ".join(f"{b:02X}" for b in detail)
+                word = detail[0] * 256 + detail[1] if len(detail) >= 2 else detail[0]
+                log(f"  {label:40s} [22{pid_hex}] ANSWERS: {raw}  (as a number: {word})")
+                answered.append((label, pid_hex, detail))
+            elif kind == "refused":
+                log(f"  {label:40s} [22{pid_hex}] refused, reason {detail}"
+                    + (" (the PCM doesn't have this PID)" if detail == "12" else ""))
+            else:
+                log(f"  {label:40s} [22{pid_hex}] no answer {detail}")
+    finally:
+        if "OK" not in adapter.command(OBD_HEADER).upper():
+            log("  WARNING: the adapter did not restore the OBD header. Unplug it to reset.")
+    if catalog and answered:
+        today = datetime.date.today().isoformat()
+        log("\n--- Paste into PidCatalog.java (fill in NAME, UNIT and the formula) ---")
+        for label, pid_hex, data in answered:
+            n = min(len(data), 2)
+            decode = "b -> word(b) * 1.0" if n == 2 else "b -> b[0] * 1.0"
+            log(f'        ford(FORD_NEW_{pid_hex}, "{pid_hex}", {n}, "NAME (unverified)", "UNIT", "%.1f", {decode})')
+            log(f'                .formula("FORMULA").from(Trust.UNVERIFIED, "SOURCE");')
+        log("\n--- Paste into docs/PROVENANCE.md (captures table) ---")
+        for label, pid_hex, data in answered:
+            raw = " ".join(f"{b:02X}" for b in data)
+            log(f"| 22 {pid_hex[:2]} {pid_hex[2:]} | {raw} | {today} | CONDITIONS (key on engine off? idle? temp?) | KNOWN-GOOD VALUE AND WHERE IT CAME FROM |")
+    return answered
 
 
 def find_adapter_port():
@@ -145,6 +228,13 @@ STANDARD_PIDS = [
 # older PCM on J1850 PWM instead of CAN, so these are NOT expected to
 # work as-is -- they're included because trying costs nothing and a
 # shared PID number across Ford generations does happen occasionally.
+APP_MODE22_PIDS = [
+    ("Engine oil temp", "1310"), ("IPR duty", "1434"), ("Injection control pressure", "1446"),
+    ("MAP (unverified)", "1440"), ("BARO (unverified)", "1442"), ("Exhaust back pressure (unverified)", "1445"),
+    ("Fuel pulse width (unverified)", "1410"), ("Fuel desired (unverified)", "1412"),
+    ("Trans fluid temp (unverified)", "11BD"), ("Code count (unconfirmed)", "0200"), ("Code count (unconfirmed)", "0202"),
+]
+
 CANDIDATE_MODE22_PIDS = [
     ("Ambient Air Temp (enhanced)", "F446"),
     ("DPF Regen Status", "F48B"),
@@ -155,21 +245,17 @@ CANDIDATE_MODE22_PIDS = [
     ("Engine Oil Temp (enhanced)", "F45C"),
     ("Fuel Tank Level (enhanced)", "F42F"),
     ("Transmission Fluid Temp", "1E1C"),
-    # 7.3L-specific guesses seen referenced (unverified) in Diesel Stop /
-    # PowerStrokeNation threads discussing ICP/IPR:
-    ("ICP (guess)", "1440"),
-    ("ICP (guess 2)", "1442"),
-    ("IPR Duty Cycle (guess)", "1130"),
+    ("IPR Duty Cycle (forum guess)", "1130"),
 ]
 
 
-def forscan_candidates(path):
-    """Mode 22 PIDs from a FORScan-exported CSV/log or PID list.
+def pid_list_candidates(path):
+    """Mode 22 PIDs from a text file you wrote from public sources.
 
-    FORScan lists enhanced PIDs as 4 hex digits (e.g. 'ICP_PSI,1446' or
-    'PID 0x1310'). Any 4-digit hex token found is a candidate; we never trust
-    its scaling, only whether the PCM answers, and print the raw bytes so the
-    formula can be worked out against what FORScan shows on screen.
+    Any 4-hex-digit token is a candidate (e.g. 'ICP 1446' or 'PID 0x1310'). Only whether
+    the PCM answers is trusted, never a scaling from the file. The raw bytes are printed
+    so the formula can be worked out on the truck. Do not use another scan tool's PID or
+    configuration files here (clean-room rule, see the top of this file).
     """
     found = []
     for line in Path(path).read_text(errors="replace").splitlines():
@@ -181,31 +267,25 @@ def forscan_candidates(path):
     return found
 
 
-def sweep_mode22(adapter, start, end, header="ATSHC410F1"):
-    """Asks the PCM for every Mode 22 PID in [start, end]; logs the ones that answer."""
-    log(f"\n=== Mode 22 sweep {start:04X}-{end:04X} (header {header}) ===")
-    adapter.command(header)
-    hits = []
-    for pid in range(start, end + 1):
-        resp = adapter.command(f"22{pid:04X}", timeout=1.5)
-        up = re.sub(r"\s", "", resp).upper()
-        if f"62{pid:04X}" in up:
-            raw = [l for l in clean_lines(resp)]
-            hits.append(pid)
-            log(f"  22{pid:04X} ANSWERS: {raw}")
-    log(f"Sweep done: {len(hits)} PID(s) answered: {' '.join(f'{p:04X}' for p in hits)}")
-    adapter.command("ATSH616AF1")
+def sweep_mode22(adapter, start, end, catalog=False):
+    """Asks the PCM for every Mode 22 PID in [start, end]; reports answers and refusals apart."""
+    log(f"\n=== Mode 22 sweep {start:04X}-{end:04X} (to the PCM) ===")
+    hits = read_mode22(adapter, [("", f"{pid:04X}") for pid in range(start, end + 1)], catalog)
+    log(f"Sweep done: {len(hits)} PID(s) answered: {' '.join(p for _, p, _ in hits)}")
     return hits
 
 
 def main():
-    # Optional flags: --forscan FILE (try PIDs seen in FORScan), --sweep START END (hex)
+    # Optional flags: --pids FILE (try a public-source PID list), --sweep START END (hex), --catalog
     args = sys.argv[1:]
-    forscan_file = None
+    pid_file = None
     sweep = None
-    if "--forscan" in args:
-        i = args.index("--forscan")
-        forscan_file = args[i + 1]
+    catalog = "--catalog" in args
+    if catalog:
+        args.remove("--catalog")
+    if "--pids" in args:
+        i = args.index("--pids")
+        pid_file = args[i + 1]
         del args[i:i + 2]
     if "--sweep" in args:
         i = args.index("--sweep")
@@ -278,31 +358,29 @@ def main():
                 log(f"  {name:30s} [{pid_hex}] advertised as supported but NO DATA back "
                     f"(raw: {clean_lines(resp)})")
 
-        # --- try the unverified Ford enhanced codes ---
-        log("\n=== Trying Ford enhanced (Mode 22) candidate codes ===")
-        log("(unverified for the 7.3L -- most will fail, that's expected and fine)")
-        for name, pid_hex in CANDIDATE_MODE22_PIDS:
-            resp = adapter.command(f"22{pid_hex}")
-            lines = clean_lines(resp)
-            failed_markers = ("NO DATA", "?", "UNABLE TO CONNECT", "ERROR")
-            if any(m in resp.upper() for m in failed_markers) or not lines:
-                log(f"  {name:30s} [22{pid_hex}] no answer")
-            else:
-                log(f"  {name:30s} [22{pid_hex}] RAW RESPONSE: {lines}  <-- looks live, investigate")
+        # --- the Ford readings the app uses, then the unverified candidates ---
+        log("\n=== Ford (Mode 22) PIDs AutoSentry reads, asked of the PCM ===")
+        read_mode22(adapter, APP_MODE22_PIDS, catalog)
+        log("\n=== Other Ford (Mode 22) candidates ===")
+        log("(unverified for the 7.3L -- most will be refused, that's expected and fine)")
+        read_mode22(adapter, CANDIDATE_MODE22_PIDS, catalog)
 
-        if forscan_file:
-            log(f"\n=== Trying PIDs found in FORScan file {forscan_file} ===")
-            adapter.command("ATSHC410F1")
-            for label, pid_hex in forscan_candidates(forscan_file):
-                resp = adapter.command(f"22{pid_hex}", timeout=2)
-                if f"62{pid_hex}" in re.sub(r"\s", "", resp).upper():
-                    log(f"  {label:40s} [22{pid_hex}] ANSWERS: {clean_lines(resp)}")
-                else:
-                    log(f"  {label:40s} [22{pid_hex}] no answer")
-            adapter.command("ATSH616AF1")
+        if pid_file:
+            log(f"\n=== Trying PIDs listed in {pid_file} ===")
+            read_mode22(adapter, pid_list_candidates(pid_file), catalog)
 
         if sweep:
-            sweep_mode22(adapter, *sweep)
+            sweep_mode22(adapter, *sweep, catalog=catalog)
+
+        # --- Ford continuous-memory codes (service 13 to the PCM), raw ---
+        log("\n=== Ford memory codes (13 to the PCM) ===")
+        if "OK" in adapter.command(PCM_HEADER).upper():
+            try:
+                log(f"  raw reply: {clean_lines(adapter.command('13', timeout=6))}")
+                log("  Expected if it works: lines starting 53, then two bytes per code, padded with 00 00.")
+                log("  A line starting 7F 13 is a refusal. Send this log either way.")
+            finally:
+                adapter.command(OBD_HEADER)
 
         # --- stored diagnostic codes, since we're already connected ---
         log("\n=== Stored DTCs (Mode 03) ===")

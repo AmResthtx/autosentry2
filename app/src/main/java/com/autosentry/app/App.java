@@ -12,6 +12,10 @@ public class App extends Application {
         super.onCreate();
         NotificationUtils.ensureChannels(this);
         installCrashLogger();
+        // One line per app start: after an update, the log shows which build took over and
+        // whether it carries the persistent key (docs/UPDATES.md).
+        AppLog.i(this, "App", "AutoSentry " + BuildConfig.VERSION_NAME + " build " + BuildConfig.VERSION_CODE
+                + (BuildConfig.PERSISTENT_KEY ? ", persistent signing key" : ", TEST signing key (can't update a regular install)"));
         TrackingWatchdogWorker.schedule(this);
     }
 

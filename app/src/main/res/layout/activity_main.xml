@@ -353,6 +353,21 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:columnCount="5" />
+
+                <Button
+                    android:id="@+id/buttonLiveGraph"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Graphs and recording" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:text="Hold a gauge for its details: what is asked of the truck, the formula, where it comes from, and whether it has been confirmed on this truck."
+                    android:textColor="@color/fs_muted"
+                    android:textSize="12sp" />
             </LinearLayout>
         </ScrollView>
 
@@ -676,6 +691,28 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:text="Save trips to tablet" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="App updates keep your data. A backup is for uninstalling or moving to another tablet: it saves trips, maintenance, photos and settings to one file in Downloads/AutoSentry."
+                    android:textColor="@color/fs_muted"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/buttonBackup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Back up everything" />
+
+                <Button
+                    android:id="@+id/buttonRestore"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Restore from a backup" />
 
                 <Button
                     android:id="@+id/buttonDebugLog"

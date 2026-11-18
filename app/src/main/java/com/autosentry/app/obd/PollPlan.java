@@ -28,8 +28,12 @@ public final class PollPlan {
         NO_ANSWER("truck didn't answer"),
         /** The truck's computer said it doesn't have this reading. */
         REFUSED("the truck's computer says it doesn't have this reading"),
-        /** The truck's own list of standard readings leaves this one out, so it isn't asked for. */
-        NOT_OFFERED("this truck doesn't report it");
+        /**
+         * The truck's own list of standard readings leaves this one out, so it isn't asked for.
+         * The truck may still have it under a maker-specific code (the 7.3L keeps most readings
+         * in Ford's Mode 22, which FORScan reads), so the label never says the truck lacks it.
+         */
+        NOT_OFFERED("not in the truck's standard OBD list; AutoSentry doesn't have Ford's code for it yet");
 
         public final String label;
 
